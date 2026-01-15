@@ -7,13 +7,42 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AddressType {
+  HOME
+  WORK
+  OTHER
+}
+
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String    @id @default(uuid())
+  email     String    @unique
   password  String
   name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  phone     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  addresses Address[]
 
   @@map("users")
+}
+
+model Address {
+  id        String      @id @default(uuid())
+  userId    String
+  name      String      // Receiver name
+  phone     String      // Delivery phone number
+  line1     String      // House no, building
+  line2     String?     // Area, landmark
+  city      String
+  state     String
+  pincode   String
+  country   String      @default("India")
+  type      AddressType @default(HOME)
+  isDefault Boolean     @default(false)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([userId])
+  @@map("addresses")
 }
