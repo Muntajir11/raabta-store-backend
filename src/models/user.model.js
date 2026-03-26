@@ -21,6 +21,21 @@ const userSchema = new mongoose.Schema(
       required: true,
       select: false,
     },
+    refreshTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    refreshTokenJti: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    refreshTokenExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   { timestamps: true }
 );

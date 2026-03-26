@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { apiRouter } from './src/routes/index.js';
@@ -18,6 +19,16 @@ async function main() {
   if (!mongoUri) {
     throw new Error('MONGODB_URI is required');
   }
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || process.env.JWT_SECRET.includes('change-me')) {
+    throw new Error('JWT_SECRET must be set to a strong random value (32+ chars)');
+  }
+  if (
+    !process.env.JWT_REFRESH_SECRET ||
+    process.env.JWT_REFRESH_SECRET.length < 32 ||
+    process.env.JWT_REFRESH_SECRET.includes('change-me')
+  ) {
+    throw new Error('JWT_REFRESH_SECRET must be set to a strong random value (32+ chars)');
+  }
 
   console.log(`[bootstrap] Starting API in ${nodeEnv} mode`);
   console.log(`[bootstrap] Connecting to MongoDB`);
@@ -33,6 +44,7 @@ async function main() {
       credentials: true,
     })
   );
+  app.use(cookieParser());
   app.use(express.json({ limit: '100kb' }));
   app.use((req, res, next) => {
     const started = Date.now();

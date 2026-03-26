@@ -10,7 +10,7 @@ export function errorHandler(err, _req, res, _next) {
   const code = err.code;
 
   const level = status >= 500 ? 'error' : 'warn';
-  console[level](`[errorHandler] status=${status} code=${code || 'N/A'} message=${err.message || 'Unknown error'}`);
+  console[level](`[errorHandler] status=${status} code=${code || 'N/A'}`);
   if (status === 500) console.error(err);
 
   res.status(status).json({
