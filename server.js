@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import helmet from 'helmet';
@@ -7,13 +8,19 @@ import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { apiRouter } from './src/routes/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import { formatHttpAccessLine } from './src/lib/requestLog.js';
 
 dotenv.config();
 
 async function main() {
   const port = Number(process.env.PORT || 5000);
   const mongoUri = process.env.MONGODB_URI;
-  const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+  const corsOriginRaw =
+    process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174';
+  const corsAllowedOrigins = corsOriginRaw
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   const nodeEnv = process.env.NODE_ENV || 'development';
 
   if (!mongoUri) {
@@ -31,6 +38,7 @@ async function main() {
   }
 
   console.log(`[bootstrap] Starting API in ${nodeEnv} mode`);
+  console.log(`[bootstrap] CORS allowed origins: ${corsAllowedOrigins.join(', ')}`);
   console.log(`[bootstrap] Connecting to MongoDB`);
   await mongoose.connect(mongoUri);
   console.log(`[bootstrap] MongoDB connected`);
@@ -40,17 +48,29 @@ async function main() {
   app.use(helmet());
   app.use(
     cors({
-      origin: corsOrigin,
+      origin(origin, callback) {
+        if (!origin) {
+          return callback(null, true);
+        }
+        if (corsAllowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(null, false);
+      },
       credentials: true,
     })
   );
   app.use(cookieParser());
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '500kb' }));
+  app.use((req, res, next) => {
+    req.requestId = crypto.randomUUID();
+    next();
+  });
   app.use((req, res, next) => {
     const started = Date.now();
     res.on('finish', () => {
       const ms = Date.now() - started;
-      console.log(`[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms)`);
+      console.log(formatHttpAccessLine(req, res.statusCode, ms));
     });
     next();
   });
@@ -65,7 +85,7 @@ async function main() {
 
   app.use('/api', apiRouter);
 
-  app.use((_req, res) => {
+  app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Not found' });
   });
 

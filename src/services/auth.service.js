@@ -15,6 +15,7 @@ function toPublicUser(doc) {
     id: doc.id,
     name: doc.name,
     email: doc.email,
+    role: doc.role || 'user',
   };
 }
 
@@ -49,6 +50,7 @@ export async function registerUser(input) {
     const err = new Error('Email already registered');
     err.statusCode = 409;
     err.code = 'EMAIL_EXISTS';
+    err.details = { email: emailNorm, context: 'registerUser' };
     throw err;
   }
 
@@ -74,6 +76,7 @@ export async function loginUser(input) {
     const err = new Error('Invalid email or password');
     err.statusCode = 401;
     err.code = 'INVALID_CREDENTIALS';
+    err.details = { reason: 'no_user_for_email', email: emailNorm, context: 'loginUser' };
     throw err;
   }
 
@@ -82,6 +85,7 @@ export async function loginUser(input) {
     const err = new Error('Invalid email or password');
     err.statusCode = 401;
     err.code = 'INVALID_CREDENTIALS';
+    err.details = { reason: 'password_mismatch', userId: user.id, context: 'loginUser' };
     throw err;
   }
 
@@ -95,10 +99,15 @@ export async function refreshSession(refreshToken) {
   let payload;
   try {
     payload = verifyRefreshToken(refreshToken);
-  } catch {
+  } catch (verifyErr) {
     const err = new Error('Invalid session');
     err.statusCode = 401;
     err.code = 'INVALID_SESSION';
+    err.details = {
+      reason: 'refresh_jwt_verify_failed',
+      context: 'refreshSession',
+      cause: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+    };
     throw err;
   }
 
@@ -106,6 +115,7 @@ export async function refreshSession(refreshToken) {
     const err = new Error('Invalid session');
     err.statusCode = 401;
     err.code = 'INVALID_SESSION';
+    err.details = { reason: 'not_refresh_token_payload', context: 'refreshSession' };
     throw err;
   }
 
@@ -115,6 +125,7 @@ export async function refreshSession(refreshToken) {
     const err = new Error('Invalid session');
     err.statusCode = 401;
     err.code = 'INVALID_SESSION';
+    err.details = { reason: 'missing_sub_or_jti', context: 'refreshSession' };
     throw err;
   }
 
@@ -125,6 +136,11 @@ export async function refreshSession(refreshToken) {
     const err = new Error('Session expired');
     err.statusCode = 401;
     err.code = 'SESSION_EXPIRED';
+    err.details = {
+      reason: 'no_stored_refresh_session',
+      userId,
+      context: 'refreshSession',
+    };
     throw err;
   }
 
@@ -139,6 +155,11 @@ export async function refreshSession(refreshToken) {
     const err = new Error('Session expired');
     err.statusCode = 401;
     err.code = 'SESSION_EXPIRED';
+    err.details = {
+      reason: isExpired ? 'refresh_token_expired' : 'refresh_token_mismatch_or_revoked',
+      userId,
+      context: 'refreshSession',
+    };
     throw err;
   }
 

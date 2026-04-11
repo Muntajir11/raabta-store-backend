@@ -5,6 +5,7 @@ import {
   readRefreshCookie,
   setAuthCookies,
 } from '../lib/authTokens.js';
+import { formatErrorLogPrefix, getClientIp } from '../lib/requestLog.js';
 
 const registerSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -27,14 +28,6 @@ const MAX_FAILURES_PER_EMAIL = 5;
 const LOCK_MS = 15 * 60 * 1000;
 const ipFailures = new Map();
 const emailFailures = new Map();
-
-function getClientIp(req) {
-  const value = req.headers['x-forwarded-for'];
-  if (typeof value === 'string' && value.trim()) {
-    return value.split(',')[0].trim();
-  }
-  return req.ip || 'unknown';
-}
 
 function getFailureEntry(store, key) {
   const now = Date.now();
@@ -94,6 +87,9 @@ export async function register(req, res, next) {
     }
     const data = await authService.registerUser(parsed.data);
     setAuthCookies(res, data.accessToken, data.refreshToken);
+    const u = data.user;
+    const roleLabel = u.role === 'admin' ? 'admin' : 'user';
+    req.logMessage = `${u.name} registered and signed in as ${roleLabel} (${u.email})`;
     return res.status(201).json({ success: true, data: { user: data.user } });
   } catch (err) {
     return next(err);
@@ -128,6 +124,9 @@ export async function login(req, res, next) {
     const data = await authService.loginUser(parsed.data);
     clearLoginFailures(ip, emailNorm);
     setAuthCookies(res, data.accessToken, data.refreshToken);
+    const u = data.user;
+    const roleLabel = u.role === 'admin' ? 'admin' : 'user';
+    req.logMessage = `${u.name} logged in as ${roleLabel} (${u.email})`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
     const ip = getClientIp(req);
@@ -146,6 +145,9 @@ export async function refresh(req, res, next) {
   try {
     const refreshToken = readRefreshCookie(req);
     if (!refreshToken) {
+      console.warn(
+        `[auth] No refresh cookie — session cannot be renewed | ${formatErrorLogPrefix(req)}`
+      );
       return res.status(401).json({
         success: false,
         message: 'Session expired',
@@ -155,6 +157,7 @@ export async function refresh(req, res, next) {
 
     const data = await authService.refreshSession(refreshToken);
     setAuthCookies(res, data.accessToken, data.refreshToken);
+    req.logMessage = `Session refreshed for ${data.user.email} (${data.user.role === 'admin' ? 'admin' : 'user'})`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
     clearAuthCookies(res);
@@ -190,5 +193,8 @@ export async function session(req, res) {
       code: 'UNAUTHORIZED',
     });
   }
+  // Avoid cached / conditional responses for auth state; keeps session checks predictable.
+  res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
   return res.status(200).json({ success: true, data: { user: req.authUser } });
 }

@@ -25,16 +25,50 @@ const productSchema = new mongoose.Schema(
       trim: true,
       maxlength: 160,
     },
+    description: {
+      type: String,
+      default: '',
+      maxlength: 20000,
+    },
+    brand: {
+      type: String,
+      default: 'Raabta',
+      trim: true,
+      maxlength: 120,
+    },
+    rating: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 5,
+    },
+    features: {
+      type: [String],
+      default: [],
+    },
     basePrice: {
       type: Number,
       required: true,
       min: 0,
     },
+    /** Public URL: external (https://...) or `/api/products/:productId/image` when stored in DB. */
     image: {
       type: String,
       required: true,
       trim: true,
       maxlength: 2048,
+    },
+    /** Raw image bytes when not using an external URL (e.g. Cloudinary later). Not selected by default. */
+    imageData: {
+      type: Buffer,
+      default: undefined,
+      select: false,
+    },
+    imageMimeType: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 100,
     },
     category: {
       type: String,
@@ -63,5 +97,7 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+productSchema.index({ category: 1, isActive: 1 });
 
 export const Product = mongoose.models.Product ?? mongoose.model('Product', productSchema);

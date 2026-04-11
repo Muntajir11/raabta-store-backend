@@ -36,6 +36,35 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+      index: true,
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 20,
+    },
+    city: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 120,
+    },
+    address: {
+      type: String,
+      default: '',
+      maxlength: 500,
+    },
+    gender: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 32,
+    },
   },
   { timestamps: true }
 );

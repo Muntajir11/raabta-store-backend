@@ -4,7 +4,7 @@ function normalizeOrigin(value) {
 
 function getTrustedOrigins() {
   const configured = process.env.CSRF_TRUSTED_ORIGINS;
-  const fallback = process.env.CORS_ORIGIN || 'http://localhost:5173';
+  const fallback = process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174';
   const raw = configured && configured.trim() ? configured : fallback;
 
   return new Set(
@@ -39,6 +39,11 @@ export function csrfProtection(req, res, next) {
   const reqOrigin = getRequestOrigin(req);
 
   if (!reqOrigin || !trustedOrigins.has(reqOrigin)) {
+    console.warn(
+      `[csrf] blocked ${req.method} ${req.originalUrl} | origin=${reqOrigin || 'none'} | trusted=${[
+        ...trustedOrigins,
+      ].join(',')}`
+    );
     return res.status(403).json({
       success: false,
       message: 'CSRF validation failed',

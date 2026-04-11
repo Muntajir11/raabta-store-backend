@@ -40,12 +40,14 @@ function resolveVariant(catalogProduct, selection) {
     const err = new Error('Invalid size for product');
     err.statusCode = 400;
     err.code = 'INVALID_SIZE';
+    err.details = { productId: catalogProduct.productId, size, allowedSizes };
     throw err;
   }
   if (!allowedColors.includes(color)) {
     const err = new Error('Invalid color for product');
     err.statusCode = 400;
     err.code = 'INVALID_COLOR';
+    err.details = { productId: catalogProduct.productId, color, allowedColors };
     throw err;
   }
 
@@ -54,6 +56,11 @@ function resolveVariant(catalogProduct, selection) {
     const err = new Error('Invalid GSM for product');
     err.statusCode = 400;
     err.code = 'INVALID_GSM';
+    err.details = {
+      productId: catalogProduct.productId,
+      gsm,
+      availableGsm: (catalogProduct.gsmOptions || []).map((o) => o.gsm),
+    };
     throw err;
   }
 
@@ -130,9 +137,10 @@ export async function getCartByUserId(userId) {
 export async function addCartItem(userId, input) {
   const catalogProduct = await getActiveProductByProductId(input.productId);
   if (!catalogProduct) {
-    const err = new Error('Product not found');
+    const err = new Error('Product not found or inactive');
     err.statusCode = 404;
     err.code = 'PRODUCT_NOT_FOUND';
+    err.details = { productId: input.productId, context: 'addCartItem' };
     throw err;
   }
 
@@ -150,6 +158,11 @@ export async function updateCartItemQty(userId, selection, qty) {
     const err = new Error('Cart item not found');
     err.statusCode = 404;
     err.code = 'CART_ITEM_NOT_FOUND';
+    err.details = {
+      userId,
+      line: normalizeSelection(selection),
+      context: 'updateCartItemQty',
+    };
     throw err;
   }
   target.qty = qty;
