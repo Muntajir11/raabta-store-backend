@@ -4,6 +4,6 @@ export const PRODUCT_SECTIONS = [
   'Sports',
   'Streetwear',
   'Customisation',
-  'Islamic',
-  'Lifestyle',
+  'Raabta Lifestyle',
+  'Raabta Studio',
 ];

@@ -39,3 +39,4 @@ function multerIfMultipart(req, res, next) {
 adminRouter.post('/products', csrfProtection, multerIfMultipart, adminProduct.create);
 adminRouter.patch('/products/:productId', csrfProtection, multerIfMultipart, adminProduct.update);
 adminRouter.patch('/products/:productId/toggle-active', csrfProtection, adminProduct.toggleActive);
+adminRouter.delete('/products/:productId', csrfProtection, adminProduct.remove);

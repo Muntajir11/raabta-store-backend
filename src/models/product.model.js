@@ -51,24 +51,20 @@ const productSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    /** Public URL: external (https://...) or `/api/products/:productId/image` when stored in DB. */
+    /** Public image URL (HTTPS), e.g. Cloudinary secure_url or pasted link. */
     image: {
       type: String,
       required: true,
       trim: true,
       maxlength: 2048,
     },
-    /** Raw image bytes when not using an external URL (e.g. Cloudinary later). Not selected by default. */
-    imageData: {
-      type: Buffer,
-      default: undefined,
-      select: false,
-    },
-    imageMimeType: {
+    /** Cloudinary public_id for admin uploads; used to replace/delete assets. Not exposed in storefront selects. */
+    imageCloudinaryPublicId: {
       type: String,
       default: '',
       trim: true,
-      maxlength: 100,
+      maxlength: 512,
+      select: false,
     },
     category: {
       type: String,

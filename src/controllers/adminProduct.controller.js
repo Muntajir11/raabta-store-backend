@@ -46,6 +46,9 @@ const jsonBodySchema = z.object({
     .default(true),
 });
 
+/** POST create — server assigns productId; body must not include productId */
+const createJsonSchema = jsonBodySchema.omit({ productId: true });
+
 const patchJsonSchema = z
   .object({
     name: z.string().trim().min(1).max(160).optional(),
@@ -193,11 +196,11 @@ export async function create(req, res, next) {
     let data;
     if (isMultipart) {
       const raw = parseMultipartProductBody(req, { requireImage: true });
-      const pid = String(raw.productId || '').trim();
+      delete raw.productId;
       if (req.file) {
-        const parsed = jsonBodySchema.parse({
+        const parsed = createJsonSchema.parse({
           ...raw,
-          image: productService.publicImageApiPath(pid),
+          image: raw.image?.trim() || 'https://placeholder.invalid/pending-product-image',
         });
         data = {
           ...parsed,
@@ -205,16 +208,18 @@ export async function create(req, res, next) {
           imageMimeType: req.file.mimetype,
         };
       } else {
-        data = jsonBodySchema.parse({
+        data = createJsonSchema.parse({
           ...raw,
           image: raw.image,
         });
       }
     } else {
-      data = jsonBodySchema.parse(req.body);
+      const body = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+      delete body.productId;
+      data = createJsonSchema.parse(body);
     }
     const created = await productService.createProductAdmin(data);
-    console.log(`[admin] product created productId=${created.productId} req=${req.requestId || '—'}`);
+    console.log(`[admin] product created productId=${created.productId}`);
     return res.status(201).json({ success: true, data: created });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -250,7 +255,7 @@ export async function update(req, res, next) {
       patch = patchJsonSchema.parse(req.body);
     }
     const updated = await productService.updateProductAdmin(productId, patch);
-    console.log(`[admin] product updated productId=${productId} req=${req.requestId || '—'}`);
+    console.log(`[admin] product updated productId=${productId}`);
     return res.status(200).json({ success: true, data: updated });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -269,9 +274,20 @@ export async function toggleActive(req, res, next) {
     const { productId } = req.params;
     const updated = await productService.toggleProductActiveAdmin(productId);
     console.log(
-      `[admin] product toggle active productId=${productId} isActive=${updated.isActive} req=${req.requestId || '—'}`
+      `[admin] product toggle active productId=${productId} isActive=${updated.isActive}`
     );
     return res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function remove(req, res, next) {
+  try {
+    const { productId } = req.params;
+    await productService.deleteProductAdmin(productId);
+    console.log(`[admin] product deleted productId=${productId}`);
+    return res.status(200).json({ success: true, data: { productId } });
   } catch (err) {
     return next(err);
   }

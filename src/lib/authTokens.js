@@ -20,18 +20,21 @@ function getCookieBaseOptions() {
   };
 }
 
+/** Align access + refresh cookie/JWT defaults (override with JWT_*_EXPIRES_IN). */
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
 function getAccessMaxAgeMs() {
-  return 15 * 60 * 1000;
+  return SEVEN_DAYS_MS;
 }
 
 function getRefreshMaxAgeMs() {
-  return 7 * 24 * 60 * 60 * 1000;
+  return SEVEN_DAYS_MS;
 }
 
 export function signAccessToken(user) {
   const secret = requireEnv('JWT_SECRET');
   return jwt.sign({ sub: user.id, email: user.email, typ: 'access' }, secret, {
-    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '7d',
   });
 }
 

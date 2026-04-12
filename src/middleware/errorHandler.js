@@ -33,7 +33,6 @@ export function errorHandler(err, req, res, _next) {
       : err.message || 'Internal server error';
   const code = err.code;
   const prefix = formatErrorLogPrefix(req);
-  const rid = req.requestId || '—';
   const userPart = req.authUser?.id ? `userId=${req.authUser.id}` : 'userId=—';
   const at = firstProjectStackFrame(err.stack) || '—';
   let detailsPart = '';
@@ -45,7 +44,7 @@ export function errorHandler(err, req, res, _next) {
     }
   }
 
-  const summary = `[${code || 'NO_CODE'}] ${message} (HTTP ${status}) | req=${rid} | ${userPart} | at ${at}${detailsPart}`;
+  const summary = `[${code || 'NO_CODE'}] ${message} (HTTP ${status}) | ${userPart} | at ${at}${detailsPart}`;
 
   if (status >= 500) {
     console.error('[errorHandler]', prefix, summary);

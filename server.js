@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import helmet from 'helmet';
@@ -9,6 +8,7 @@ import mongoose from 'mongoose';
 import { apiRouter } from './src/routes/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { formatHttpAccessLine } from './src/lib/requestLog.js';
+import { isCloudinaryConfigured } from './src/lib/cloudinaryUpload.js';
 
 dotenv.config();
 
@@ -42,6 +42,13 @@ async function main() {
   console.log(`[bootstrap] Connecting to MongoDB`);
   await mongoose.connect(mongoUri);
   console.log(`[bootstrap] MongoDB connected`);
+  if (isCloudinaryConfigured()) {
+    console.log('[bootstrap] Product image uploads: Cloudinary configured');
+  } else {
+    console.warn(
+      '[bootstrap] Product image uploads: Cloudinary not configured — admin file uploads will fail until CLOUDINARY_URL (or cloud name/key/secret) is set'
+    );
+  }
 
   const app = express();
 
@@ -62,10 +69,6 @@ async function main() {
   );
   app.use(cookieParser());
   app.use(express.json({ limit: '500kb' }));
-  app.use((req, res, next) => {
-    req.requestId = crypto.randomUUID();
-    next();
-  });
   app.use((req, res, next) => {
     const started = Date.now();
     res.on('finish', () => {

@@ -132,7 +132,7 @@ export function describeHttpFinish(req, statusCode) {
 }
 
 /**
- * One line for access logs: IST time, IP, request id, message, route, status, latency.
+ * One line for access logs: IST time, IP, message, route, status, latency.
  * @param {import('express').Request} req
  * @param {number} statusCode
  * @param {number} ms
@@ -140,10 +140,9 @@ export function describeHttpFinish(req, statusCode) {
 export function formatHttpAccessLine(req, statusCode, ms) {
   const ts = formatIst12h();
   const ip = getClientIp(req);
-  const rid = req.requestId || '—';
   const msg = describeHttpFinish(req, statusCode);
   const route = `${req.method || '—'} ${req.originalUrl || req.url || '—'}`;
-  return `[http] ${ts} IST | ip=${ip} | req=${rid} | ${msg} | ${route} → ${statusCode} (${ms}ms)`;
+  return `[http] ${ts} IST | ip=${ip} | ${msg} | ${route} → ${statusCode} (${ms}ms)`;
 }
 
 /**
@@ -153,7 +152,6 @@ export function formatHttpAccessLine(req, statusCode, ms) {
 export function formatErrorLogPrefix(req) {
   const ts = formatIst12h();
   const ip = getClientIp(req);
-  const rid = req.requestId || '—';
   const route = `${req.method || '—'} ${req.originalUrl || req.url || '—'}`;
-  return `${ts} IST | ip=${ip} | req=${rid} | ${route}`;
+  return `${ts} IST | ip=${ip} | ${route}`;
 }

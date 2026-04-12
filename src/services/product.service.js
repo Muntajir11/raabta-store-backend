@@ -1,5 +1,58 @@
+import {
+  destroyProductImage,
+  uploadProductImageBuffer,
+} from '../lib/cloudinaryUpload.js';
+import { Cart } from '../models/cart.model.js';
+import { Counter } from '../models/counter.model.js';
 import { Product } from '../models/product.model.js';
 import { PRODUCT_SECTIONS } from '../constants/productSections.js';
+
+const PRODUCT_CODE_COUNTER_ID = 'productCode';
+
+/**
+ * Max numeric-only productId in the catalog (for bootstrapping the counter).
+ */
+async function getMaxNumericProductId() {
+  const rows = await Product.find({
+    productId: { $regex: /^\d+$/ },
+  })
+    .select('productId')
+    .lean();
+  let max = 0;
+  for (const row of rows) {
+    const n = parseInt(String(row.productId), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+/**
+ * Next unique numeric string product id (single atomic update; safe under concurrency).
+ */
+export async function getNextProductCode() {
+  const exists = await Counter.exists({ _id: PRODUCT_CODE_COUNTER_ID });
+  const boot = exists ? 0 : await getMaxNumericProductId();
+  const updated = await Counter.findOneAndUpdate(
+    { _id: PRODUCT_CODE_COUNTER_ID },
+    [
+      {
+        $set: {
+          seq: {
+            $add: [{ $ifNull: ['$seq', boot] }, 1],
+          },
+        },
+      },
+    ],
+    { upsert: true, new: true }
+  ).lean();
+  if (!updated || typeof updated.seq !== 'number') {
+    const err = new Error('Failed to allocate product code');
+    err.statusCode = 503;
+    err.code = 'PRODUCT_CODE_ALLOCATION_FAILED';
+    throw err;
+  }
+  return String(updated.seq);
+}
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const DEFAULT_COLORS = ['Black', 'White'];
@@ -75,11 +128,6 @@ function isAllowedSection(category) {
   return PRODUCT_SECTIONS.includes(String(category || '').trim());
 }
 
-/** URL clients use for images stored in MongoDB (served by GET /api/products/:productId/image). */
-export function publicImageApiPath(productId) {
-  return `/api/products/${encodeURIComponent(String(productId).trim())}/image`;
-}
-
 function toAdminRow(doc) {
   if (!doc) return null;
   const o = doc.toObject ? doc.toObject() : doc;
@@ -134,22 +182,34 @@ export async function createProductAdmin(data) {
     err.details = { category: data.category, allowed: PRODUCT_SECTIONS };
     throw err;
   }
-  const existing = await Product.findOne({ productId: data.productId }).lean();
-  if (existing) {
-    const err = new Error('Product ID already exists');
-    err.statusCode = 409;
-    err.code = 'PRODUCT_ID_EXISTS';
-    err.details = { productId: data.productId };
+
+  const productId = await getNextProductCode();
+
+  let imageUrl =
+    typeof data.image === 'string' && data.image.trim() ? data.image.trim() : '';
+  let imageCloudinaryPublicId = '';
+
+  if (data.imageBuffer && data.imageMimeType) {
+    const { secureUrl, publicId } = await uploadProductImageBuffer(
+      Buffer.from(data.imageBuffer),
+      {
+        productId,
+        mimeType: String(data.imageMimeType),
+      }
+    );
+    imageUrl = secureUrl;
+    imageCloudinaryPublicId = publicId;
+  }
+
+  if (!imageUrl) {
+    const err = new Error('Image is required (file upload or image URL)');
+    err.statusCode = 400;
+    err.code = 'VALIDATION_ERROR';
     throw err;
   }
 
-  const imageUrl =
-    data.imageBuffer && data.imageMimeType
-      ? publicImageApiPath(data.productId)
-      : data.image;
-
   const doc = await Product.create({
-    productId: data.productId,
+    productId,
     name: data.name,
     description: data.description ?? '',
     brand: data.brand ?? 'Raabta',
@@ -157,9 +217,7 @@ export async function createProductAdmin(data) {
     features: Array.isArray(data.features) ? data.features : [],
     basePrice: data.basePrice,
     image: imageUrl,
-    ...(data.imageBuffer && data.imageMimeType
-      ? { imageData: data.imageBuffer, imageMimeType: data.imageMimeType }
-      : {}),
+    ...(imageCloudinaryPublicId ? { imageCloudinaryPublicId } : {}),
     category: data.category,
     sizes: data.sizes?.length ? data.sizes : DEFAULT_SIZES,
     colors: data.colors?.length ? data.colors : DEFAULT_COLORS,
@@ -174,7 +232,7 @@ export async function createProductAdmin(data) {
  * @param {Record<string, unknown>} data
  */
 export async function updateProductAdmin(productId, data) {
-  const product = await Product.findOne({ productId });
+  const product = await Product.findOne({ productId }).select('+imageCloudinaryPublicId');
   if (!product) {
     const err = new Error('Product not found');
     err.statusCode = 404;
@@ -200,15 +258,23 @@ export async function updateProductAdmin(productId, data) {
   if (data.basePrice != null) product.basePrice = data.basePrice;
 
   if (data.imageBuffer && data.imageMimeType) {
-    product.imageData = Buffer.from(data.imageBuffer);
-    product.imageMimeType = String(data.imageMimeType);
-    product.image = publicImageApiPath(productId);
+    const { secureUrl, publicId } = await uploadProductImageBuffer(
+      Buffer.from(data.imageBuffer),
+      {
+        productId,
+        mimeType: String(data.imageMimeType),
+      }
+    );
+    product.image = secureUrl;
+    product.imageCloudinaryPublicId = publicId;
   } else if (data.image != null) {
-    product.image = String(data.image);
-    if (/^https?:\/\//i.test(product.image)) {
-      product.imageMimeType = '';
-      product.imageData = undefined;
+    const next = String(data.image).trim();
+    const prev = String(product.image).trim();
+    if (next !== prev && product.imageCloudinaryPublicId) {
+      await destroyProductImage(product.imageCloudinaryPublicId);
+      product.imageCloudinaryPublicId = '';
     }
+    product.image = next;
   }
 
   if (data.sizes != null) product.sizes = data.sizes;
@@ -217,10 +283,6 @@ export async function updateProductAdmin(productId, data) {
   if (data.isActive != null) product.isActive = data.isActive;
 
   await product.save();
-
-  if (data.image != null && /^https?:\/\//i.test(String(data.image))) {
-    await Product.collection.updateOne({ _id: product._id }, { $unset: { imageData: true } });
-  }
 
   const fresh = await Product.findOne({ productId });
   return toAdminRow(fresh);
@@ -238,4 +300,32 @@ export async function toggleProductActiveAdmin(productId) {
   product.isActive = !product.isActive;
   await product.save();
   return toAdminRow(product);
+}
+
+/**
+ * Permanently remove a product and its Cloudinary asset; strip from open carts.
+ * @param {string} productId
+ */
+export async function deleteProductAdmin(productId) {
+  const product = await Product.findOne({ productId }).select('+imageCloudinaryPublicId');
+  if (!product) {
+    const err = new Error('Product not found');
+    err.statusCode = 404;
+    err.code = 'PRODUCT_NOT_FOUND';
+    err.details = { productId };
+    throw err;
+  }
+  const publicId = product.imageCloudinaryPublicId;
+  if (publicId && String(publicId).trim()) {
+    try {
+      await destroyProductImage(String(publicId).trim());
+    } catch (err) {
+      console.warn(
+        `[admin] product delete: image cleanup failed productId=${productId}`,
+        err?.message || err
+      );
+    }
+  }
+  await Cart.updateMany({ 'items.productId': productId }, { $pull: { items: { productId } } });
+  await Product.deleteOne({ productId });
 }
