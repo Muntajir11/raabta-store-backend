@@ -57,6 +57,28 @@ export async function getNextProductCode() {
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const DEFAULT_COLORS = ['Black', 'White'];
 
+function uniqNormalized(list, norm) {
+  const out = [];
+  const seen = new Set();
+  for (const v of list) {
+    const raw = String(v ?? '').trim();
+    if (!raw) continue;
+    const key = norm(raw);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
+}
+
+function deriveSizesColorsFromInventory(inventory) {
+  const inv = Array.isArray(inventory) ? inventory : [];
+  if (inv.length === 0) return null;
+  const sizes = uniqNormalized(inv.map((r) => r?.size), (s) => String(s).trim().toUpperCase());
+  const colors = uniqNormalized(inv.map((r) => r?.color), (s) => String(s).trim().toLowerCase());
+  return { sizes, colors };
+}
+
 function buildDefaultGsmOptions(basePrice) {
   return [
     { gsm: 180, price: Number(basePrice.toFixed(2)), isActive: true },
@@ -81,6 +103,7 @@ function normalizeProduct(raw) {
       : buildDefaultGsmOptions(basePrice);
 
   const activeGsmOptions = gsmOptions.filter((opt) => opt && opt.isActive !== false);
+  const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
   return {
     productId: raw.productId,
     name: raw.name,
@@ -91,6 +114,7 @@ function normalizeProduct(raw) {
     sizes,
     colors,
     gsmOptions: activeGsmOptions,
+    inventory,
   };
 }
 
@@ -113,6 +137,12 @@ export async function listProducts() {
       gsmOptions: normalized.gsmOptions.map((opt) => ({
         gsm: opt.gsm,
         price: opt.price,
+      })),
+      inventory: (normalized.inventory || []).map((row) => ({
+        size: row.size,
+        color: row.color,
+        gsm: row.gsm,
+        qty: row.qty,
       })),
     };
   });
@@ -144,6 +174,7 @@ function toAdminRow(doc) {
     sizes: o.sizes?.length ? o.sizes : DEFAULT_SIZES,
     colors: o.colors?.length ? o.colors : DEFAULT_COLORS,
     gsmOptions: Array.isArray(o.gsmOptions) && o.gsmOptions.length > 0 ? o.gsmOptions : buildDefaultGsmOptions(o.basePrice),
+    inventory: Array.isArray(o.inventory) ? o.inventory : [],
     isActive: o.isActive !== false,
     createdAt: o.createdAt,
     updatedAt: o.updatedAt,
@@ -208,6 +239,7 @@ export async function createProductAdmin(data) {
     throw err;
   }
 
+  const derived = deriveSizesColorsFromInventory(data.inventory);
   const doc = await Product.create({
     productId,
     name: data.name,
@@ -219,9 +251,10 @@ export async function createProductAdmin(data) {
     image: imageUrl,
     ...(imageCloudinaryPublicId ? { imageCloudinaryPublicId } : {}),
     category: data.category,
-    sizes: data.sizes?.length ? data.sizes : DEFAULT_SIZES,
-    colors: data.colors?.length ? data.colors : DEFAULT_COLORS,
+    sizes: derived?.sizes?.length ? derived.sizes : (data.sizes?.length ? data.sizes : DEFAULT_SIZES),
+    colors: derived?.colors?.length ? derived.colors : (data.colors?.length ? data.colors : DEFAULT_COLORS),
     gsmOptions: data.gsmOptions?.length ? data.gsmOptions : buildDefaultGsmOptions(data.basePrice),
+    ...(Array.isArray(data.inventory) ? { inventory: data.inventory } : {}),
     isActive: data.isActive !== false,
   });
   return toAdminRow(doc);
@@ -280,7 +313,14 @@ export async function updateProductAdmin(productId, data) {
   if (data.sizes != null) product.sizes = data.sizes;
   if (data.colors != null) product.colors = data.colors;
   if (data.gsmOptions != null) product.gsmOptions = data.gsmOptions;
+  if (data.inventory != null) product.inventory = data.inventory;
   if (data.isActive != null) product.isActive = data.isActive;
+
+  if (data.inventory != null) {
+    const derived = deriveSizesColorsFromInventory(data.inventory);
+    if (derived?.sizes?.length) product.sizes = derived.sizes;
+    if (derived?.colors?.length) product.colors = derived.colors;
+  }
 
   await product.save();
 

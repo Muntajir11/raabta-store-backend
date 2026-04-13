@@ -9,6 +9,16 @@ const gsmOptionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const inventoryRowSchema = new mongoose.Schema(
+  {
+    size: { type: String, required: true, trim: true, maxlength: 20 },
+    color: { type: String, required: true, trim: true, maxlength: 40 },
+    gsm: { type: Number, required: true, enum: [180, 210, 240] },
+    qty: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     productId: {
@@ -83,6 +93,14 @@ const productSchema = new mongoose.Schema(
     },
     gsmOptions: {
       type: [gsmOptionSchema],
+      default: [],
+    },
+    /**
+     * Inventory by variant: size + color + gsm.
+     * When empty/missing, storefront treats variants as available (legacy products).
+     */
+    inventory: {
+      type: [inventoryRowSchema],
       default: [],
     },
     isActive: {

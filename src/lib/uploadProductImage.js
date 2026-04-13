@@ -1,6 +1,7 @@
 import multer from 'multer';
 
-const MAX_MB = Number(process.env.MAX_UPLOAD_MB || 5);
+// Product image uploads are used for storefront cards; keep them lightweight.
+const MAX_MB = Number(process.env.MAX_PRODUCT_IMAGE_MB || process.env.MAX_UPLOAD_MB || 1);
 
 const storage = multer.memoryStorage();
 

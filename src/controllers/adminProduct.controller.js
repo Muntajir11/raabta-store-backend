@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import * as productService from '../services/product.service.js';
 import { PRODUCT_SECTIONS } from '../constants/productSections.js';
+import { assertMinImageDimensions } from '../lib/validateImageDimensions.js';
 
 const gsmOptionSchema = z.object({
   gsm: z.coerce
@@ -8,6 +9,13 @@ const gsmOptionSchema = z.object({
     .refine((n) => n === 180 || n === 210 || n === 240, { message: 'gsm must be 180, 210, or 240' }),
   price: z.coerce.number().min(0),
   isActive: z.boolean().optional(),
+});
+
+const inventoryRowSchema = z.object({
+  size: z.string().trim().min(1).max(20),
+  color: z.string().trim().min(1).max(40),
+  gsm: z.coerce.number().refine((n) => n === 180 || n === 210 || n === 240, { message: 'gsm must be 180, 210, or 240' }),
+  qty: z.coerce.number().int().min(0),
 });
 
 const categorySchema = z
@@ -36,6 +44,7 @@ const jsonBodySchema = z.object({
   sizes: z.array(z.string().trim().min(1)).optional(),
   colors: z.array(z.string().trim().min(1)).optional(),
   gsmOptions: z.array(gsmOptionSchema).optional(),
+  inventory: z.array(inventoryRowSchema).optional(),
   isActive: z
     .preprocess((v) => {
       if (v === undefined || v === '') return true;
@@ -62,6 +71,7 @@ const patchJsonSchema = z
     sizes: z.array(z.string().trim().min(1)).optional(),
     colors: z.array(z.string().trim().min(1)).optional(),
     gsmOptions: z.array(gsmOptionSchema).optional(),
+    inventory: z.array(inventoryRowSchema).optional(),
     isActive: z
       .preprocess((v) => {
         if (v === undefined) return undefined;
@@ -92,6 +102,13 @@ function parseGsmOptionsJson(raw) {
   const str = typeof raw === 'string' ? raw : JSON.stringify(raw);
   const parsed = JSON.parse(str);
   return z.array(gsmOptionSchema).parse(parsed);
+}
+
+function parseInventoryJson(raw) {
+  if (raw == null || raw === '') return undefined;
+  const str = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  const parsed = JSON.parse(str);
+  return z.array(inventoryRowSchema).parse(parsed);
 }
 
 /**
@@ -134,6 +151,11 @@ function parseMultipartProductBody(req, { requireImage }) {
     gsmOptions = parseGsmOptionsJson(b.gsmOptionsJson);
   }
 
+  let inventory;
+  if (b.inventoryJson) {
+    inventory = parseInventoryJson(b.inventoryJson);
+  }
+
   const basePrice = b.basePrice != null ? Number(b.basePrice) : NaN;
   const ratingRaw = b.rating;
   let rating;
@@ -157,6 +179,7 @@ function parseMultipartProductBody(req, { requireImage }) {
     sizes,
     colors,
     gsmOptions,
+    inventory,
     isActive: b.isActive === undefined ? true : String(b.isActive) !== 'false',
   };
 
@@ -198,6 +221,7 @@ export async function create(req, res, next) {
       const raw = parseMultipartProductBody(req, { requireImage: true });
       delete raw.productId;
       if (req.file) {
+        assertMinImageDimensions(req.file.buffer, { minWidth: 640, minHeight: 800 });
         const parsed = createJsonSchema.parse({
           ...raw,
           image: raw.image?.trim() || 'https://placeholder.invalid/pending-product-image',
@@ -245,6 +269,7 @@ export async function update(req, res, next) {
       );
       patch = patchJsonSchema.parse(entries);
       if (req.file) {
+        assertMinImageDimensions(req.file.buffer, { minWidth: 640, minHeight: 800 });
         patch = {
           ...patch,
           imageBuffer: req.file.buffer,

@@ -72,6 +72,21 @@ function resolveVariant(catalogProduct, selection) {
   };
 }
 
+function resolveInventoryQty(catalogProduct, selection) {
+  const inv = Array.isArray(catalogProduct.inventory) ? catalogProduct.inventory : [];
+  if (inv.length === 0) return null; // legacy products: no stock tracking yet
+  const size = String(selection.size || '').trim().toUpperCase();
+  const color = String(selection.color || '').trim().toLowerCase();
+  const gsm = Number(selection.gsm);
+  const row = inv.find(
+    (r) =>
+      String(r?.size || '').trim().toUpperCase() === size &&
+      String(r?.color || '').trim().toLowerCase() === color &&
+      Number(r?.gsm) === gsm
+  );
+  return typeof row?.qty === 'number' ? row.qty : 0;
+}
+
 function mergeItemIntoItems(items, catalogProduct, selection, qty) {
   const idx = items.findIndex(
     (item) =>
@@ -145,6 +160,21 @@ export async function addCartItem(userId, input) {
   }
 
   const variant = resolveVariant(catalogProduct, input);
+  const stockQty = resolveInventoryQty(catalogProduct, variant);
+  if (stockQty !== null && stockQty <= 0) {
+    const err = new Error('Out of stock');
+    err.statusCode = 409;
+    err.code = 'OUT_OF_STOCK';
+    err.details = { productId: catalogProduct.productId, ...variant, qty: stockQty };
+    throw err;
+  }
+  if (stockQty !== null && Number(input.qty) > stockQty) {
+    const err = new Error('Requested quantity exceeds available stock');
+    err.statusCode = 409;
+    err.code = 'INSUFFICIENT_STOCK';
+    err.details = { productId: catalogProduct.productId, ...variant, available: stockQty, requested: input.qty };
+    throw err;
+  }
   const cart = await getOrCreateCart(userId);
   mergeItemIntoItems(cart.items, catalogProduct, variant, input.qty);
   await cart.save();
