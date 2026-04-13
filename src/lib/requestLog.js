@@ -39,6 +39,19 @@ function pathOnly(req) {
 }
 
 /**
+ * Actor label for logs (no email).
+ * @param {import('express').Request} req
+ */
+function actor(req) {
+  const u = req.authUser;
+  if (u && u.name) {
+    const id = u.id ? String(u.id).trim() : '';
+    return id ? `${u.name} (#${id})` : u.name;
+  }
+  return 'a user';
+}
+
+/**
  * Human-readable description for completed HTTP responses.
  * @param {import('express').Request} req
  * @param {number} statusCode
@@ -51,38 +64,30 @@ export function describeHttpFinish(req, statusCode) {
   const method = req.method || '—';
   const path = pathOnly(req);
   const u = req.authUser;
-  const emailGuess =
-    typeof req.body?.email === 'string' ? req.body.email.trim() : '';
 
   if (path === '/api/auth/login' && method === 'POST') {
     if (statusCode === 200) {
-      return emailGuess
-        ? `Login succeeded for ${emailGuess}`
-        : 'Login succeeded';
+      return 'Login succeeded';
     }
     if (statusCode === 429) return 'Login blocked: too many failed attempts from this IP/email';
     if (statusCode === 400) return 'Login failed: invalid request body';
-    return emailGuess
-      ? `Login failed for ${emailGuess} (wrong credentials or error)`
-      : 'Login failed';
+    return 'Login failed (wrong credentials or error)';
   }
 
   if (path === '/api/auth/register' && method === 'POST') {
     if (statusCode === 201) {
-      return emailGuess
-        ? `New account registered: ${emailGuess}`
-        : 'New account registered';
+      return 'New account registered';
     }
     return 'Registration failed or rejected';
   }
 
   if (path === '/api/auth/refresh' && method === 'POST') {
-    if (statusCode === 200) return 'Auth session refreshed (new tokens issued)';
+    if (statusCode === 200) return `${actor(req)} refreshed session`;
     return 'Session refresh failed';
   }
 
   if (path === '/api/auth/logout' && method === 'POST') {
-    return 'User logged out (cookies cleared)';
+    return `${actor(req)} logged out`;
   }
 
   if (path === '/api/auth/session' && method === 'GET') {
@@ -91,7 +96,7 @@ export function describeHttpFinish(req, statusCode) {
       u && (statusCode === 200 || statusCode === 304);
     if (sessionOk) {
       const role = u.role === 'admin' ? 'admin' : 'user';
-      return `Session verified: ${u.name} (${u.email}) as ${role}`;
+      return `Session verified: ${actor(req)} as ${role}`;
     }
     if (statusCode === 401 || !u) {
       return 'Session check: not authenticated';
@@ -100,31 +105,85 @@ export function describeHttpFinish(req, statusCode) {
   }
 
   if (path.startsWith('/api/admin')) {
-    const who = u ? `${u.name} <${u.email}>` : 'unauthenticated caller';
+    const who = u ? actor(req) : 'unauthenticated caller';
     if (statusCode === 403) {
       return `Admin route denied — ${who} is not an admin (${method} ${path})`;
     }
     if (statusCode === 401) {
       return `Admin route — not signed in (${method} ${path})`;
     }
+
     if (path.startsWith('/api/admin/customers')) {
       if (statusCode < 400 && u?.role === 'admin') {
-        return `Admin ${u.email} accessed customer data (${method} ${path})`;
+        if (method === 'GET' && path === '/api/admin/customers') {
+          return `${actor(req)} viewed customers list`;
+        }
+        const userId = req.params?.userId;
+        if (method === 'GET' && userId) {
+          return `${actor(req)} viewed customer ${userId}`;
+        }
+        return `${actor(req)} used customers admin API (${method} ${path})`;
       }
     }
+
     if (path.startsWith('/api/admin/products')) {
       if (statusCode < 400 && u?.role === 'admin') {
-        return `Admin ${u.email} used products admin API (${method} ${path})`;
+        const productId = req.params?.productId;
+        if (method === 'GET' && path === '/api/admin/products') {
+          const section = typeof req.query?.section === 'string' ? req.query.section.trim() : '';
+          const q = typeof req.query?.q === 'string' ? req.query.q.trim() : '';
+          const filters = [section ? `section=${section}` : '', q ? `q=${q}` : ''].filter(Boolean).join(' ');
+          return filters ? `${actor(req)} viewed products list (${filters})` : `${actor(req)} viewed products list`;
+        }
+        if (method === 'POST' && path === '/api/admin/products') {
+          return `${actor(req)} created product`;
+        }
+        if (method === 'PATCH' && productId && path === `/api/admin/products/${productId}`) {
+          return `${actor(req)} updated product ${productId}`;
+        }
+        if (method === 'PATCH' && productId && path === `/api/admin/products/${productId}/toggle-active`) {
+          return `${actor(req)} toggled product ${productId} visibility`;
+        }
+        if (method === 'DELETE' && productId && path === `/api/admin/products/${productId}`) {
+          return `${actor(req)} deleted product ${productId}`;
+        }
+        return `${actor(req)} used products admin API (${method} ${path})`;
       }
     }
+
     return `Admin API ${method} ${path} → HTTP ${statusCode}`;
   }
 
   if (path.startsWith('/api/cart')) {
-    return `Cart ${method} ${path} → HTTP ${statusCode}`;
+    if (method === 'GET' && path === '/api/cart') {
+      return `${actor(req)} viewed cart`;
+    }
+    if (method === 'POST' && path === '/api/cart/items') {
+      const b = req.body || {};
+      return `${actor(req)} added to cart: product=${b.productId} size=${b.size} color=${b.color} gsm=${b.gsm} qty=${b.qty}`;
+    }
+    if (method === 'PATCH' && path === '/api/cart/items') {
+      const b = req.body || {};
+      return `${actor(req)} updated cart qty: product=${b.productId} size=${b.size} color=${b.color} gsm=${b.gsm} qty=${b.qty}`;
+    }
+    if (method === 'DELETE' && path === '/api/cart/items') {
+      const b = req.body || {};
+      return `${actor(req)} removed from cart: product=${b.productId} size=${b.size} color=${b.color} gsm=${b.gsm}`;
+    }
+    if (method === 'DELETE' && path === '/api/cart') {
+      return `${actor(req)} cleared cart`;
+    }
+    if (method === 'POST' && path === '/api/cart/merge') {
+      const n = Array.isArray(req.body?.items) ? req.body.items.length : 0;
+      return `${actor(req)} merged guest cart: items=${n}`;
+    }
+    return `${actor(req)} used cart API (${method} ${path})`;
   }
 
   if (path.startsWith('/api/products')) {
+    if (method === 'GET' && path === '/api/products') {
+      return `${actor(req)} viewed products`;
+    }
     return `Storefront products ${method} ${path} → HTTP ${statusCode}`;
   }
 
