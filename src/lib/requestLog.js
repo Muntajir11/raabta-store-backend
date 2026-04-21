@@ -65,6 +65,19 @@ export function describeHttpFinish(req, statusCode) {
   const path = pathOnly(req);
   const u = req.authUser;
 
+  // Suppress noisy, expected unauthenticated requests (especially after logout).
+  if (statusCode === 401) {
+    if (method === 'GET' && (path === '/api/auth/session' || path === '/api/admin/auth/session')) {
+      return null;
+    }
+    if (method === 'POST' && (path === '/api/auth/refresh' || path === '/api/admin/auth/refresh')) {
+      return null;
+    }
+    if (method === 'GET' && (path === '/api/wishlist' || path === '/api/cart')) {
+      return null;
+    }
+  }
+
   if (path === '/api/auth/login' && method === 'POST') {
     if (statusCode === 200) {
       return 'Login succeeded';
@@ -91,17 +104,19 @@ export function describeHttpFinish(req, statusCode) {
   }
 
   if (path === '/api/auth/session' && method === 'GET') {
-    // Express may respond with 304 Not Modified when ETag matches (same as 200 for logging).
-    const sessionOk =
-      u && (statusCode === 200 || statusCode === 304);
-    if (sessionOk) {
-      const role = u.role === 'admin' ? 'admin' : 'user';
-      return `Session verified: ${actor(req)} as ${role}`;
+    // Keep session checks quiet; only log when controller sets an explicit message
+    // (e.g. a real refresh/restore happened).
+    if (typeof req.logMessage === 'string' && req.logMessage.trim()) {
+      return req.logMessage.trim();
     }
-    if (statusCode === 401 || !u) {
-      return 'Session check: not authenticated';
+    return null;
+  }
+
+  if (path === '/api/admin/auth/session' && method === 'GET') {
+    if (typeof req.logMessage === 'string' && req.logMessage.trim()) {
+      return req.logMessage.trim();
     }
-    return `Session check: HTTP ${statusCode}`;
+    return null;
   }
 
   if (path.startsWith('/api/admin')) {
@@ -200,6 +215,7 @@ export function formatHttpAccessLine(req, statusCode, ms) {
   const ts = formatIst12h();
   const ip = getClientIp(req);
   const msg = describeHttpFinish(req, statusCode);
+  if (!msg) return null;
   const route = `${req.method || '—'} ${req.originalUrl || req.url || '—'}`;
   return `[http] ${ts} IST | ip=${ip} | ${msg} | ${route} → ${statusCode} (${ms}ms)`;
 }

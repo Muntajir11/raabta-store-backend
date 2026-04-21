@@ -63,6 +63,45 @@ export function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function buildCookieNames(prefix) {
+  const p = (prefix || '').trim();
+  const base = p ? `raabta_${p}` : 'raabta';
+  return {
+    access: `${base}_at`,
+    refresh: `${base}_rt`,
+  };
+}
+
+export function makeAuthCookieHelpers(prefix = '') {
+  const names = buildCookieNames(prefix);
+  return {
+    accessCookieName: names.access,
+    refreshCookieName: names.refresh,
+    setAuthCookies(res, accessToken, refreshToken) {
+      const base = getCookieBaseOptions();
+      res.cookie(names.access, accessToken, {
+        ...base,
+        maxAge: getAccessMaxAgeMs(),
+      });
+      res.cookie(names.refresh, refreshToken, {
+        ...base,
+        maxAge: getRefreshMaxAgeMs(),
+      });
+    },
+    clearAuthCookies(res) {
+      const base = getCookieBaseOptions();
+      res.clearCookie(names.access, base);
+      res.clearCookie(names.refresh, base);
+    },
+    readAccessCookie(req) {
+      return req.cookies?.[names.access] || null;
+    },
+    readRefreshCookie(req) {
+      return req.cookies?.[names.refresh] || null;
+    },
+  };
+}
+
 export function setAuthCookies(res, accessToken, refreshToken) {
   const base = getCookieBaseOptions();
   res.cookie(ACCESS_COOKIE, accessToken, {

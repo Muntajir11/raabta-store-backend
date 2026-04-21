@@ -73,18 +73,23 @@ async function main() {
     const started = Date.now();
     res.on('finish', () => {
       const ms = Date.now() - started;
-      console.log(formatHttpAccessLine(req, res.statusCode, ms));
+      const line = formatHttpAccessLine(req, res.statusCode, ms);
+      if (line) console.log(line);
     });
     next();
   });
 
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-  app.use('/api/auth', authLimiter);
+  // In production, add a light auth rate limit to reduce brute-force attempts.
+  // In development/testing, do not rate-limit auth endpoints (it breaks UX and automation).
+  if (nodeEnv === 'production') {
+    const authLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 300,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    app.use('/api/auth', authLimiter);
+  }
 
   app.use('/api', apiRouter);
 

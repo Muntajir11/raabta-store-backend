@@ -15,6 +15,7 @@ const inventoryRowSchema = new mongoose.Schema(
     color: { type: String, required: true, trim: true, maxlength: 40 },
     gsm: { type: Number, required: true, enum: [180, 210, 240] },
     qty: { type: Number, required: true, min: 0 },
+    reorderPoint: { type: Number, min: 0, default: 5 },
   },
   { _id: false }
 );

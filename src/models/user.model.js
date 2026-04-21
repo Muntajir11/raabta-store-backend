@@ -48,7 +48,25 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 20,
     },
+    state: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 60,
+    },
     city: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 120,
+    },
+    pincode: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 10,
+    },
+    landmark: {
       type: String,
       default: '',
       trim: true,
@@ -64,6 +82,14 @@ const userSchema = new mongoose.Schema(
       default: '',
       trim: true,
       maxlength: 32,
+    },
+    wishlist: {
+      type: [String],
+      default: [],
+    },
+    marketingOptIn: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }

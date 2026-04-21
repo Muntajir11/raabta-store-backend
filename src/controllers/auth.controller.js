@@ -23,6 +23,15 @@ function formatZodError(error) {
   return first?.message ?? 'Validation failed';
 }
 
+// Login throttle is useful in production, but painful during development/testing.
+// Enable it by default only in production; can be forced via LOGIN_THROTTLE_ENABLED=true/false.
+const LOGIN_THROTTLE_ENABLED =
+  process.env.LOGIN_THROTTLE_ENABLED === 'true'
+    ? true
+    : process.env.LOGIN_THROTTLE_ENABLED === 'false'
+      ? false
+      : process.env.NODE_ENV === 'production';
+
 const MAX_FAILURES_PER_IP = 10;
 const MAX_FAILURES_PER_EMAIL = 5;
 const LOCK_MS = 15 * 60 * 1000;
@@ -111,18 +120,20 @@ export async function login(req, res, next) {
     }
     const ip = getClientIp(req);
     const emailNorm = parsed.data.email.toLowerCase().trim();
-    const lock = getLockInfo(ip, emailNorm);
-    if (lock.locked) {
-      return res.status(429).json({
-        success: false,
-        message: 'Too many failed login attempts. Please try again later.',
-        code: 'LOGIN_THROTTLED',
-        retryAfterSeconds: Math.ceil(lock.remainingMs / 1000),
-      });
+    if (LOGIN_THROTTLE_ENABLED) {
+      const lock = getLockInfo(ip, emailNorm);
+      if (lock.locked) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed login attempts. Please try again later.',
+          code: 'LOGIN_THROTTLED',
+          retryAfterSeconds: Math.ceil(lock.remainingMs / 1000),
+        });
+      }
     }
 
     const data = await authService.loginUser(parsed.data);
-    clearLoginFailures(ip, emailNorm);
+    if (LOGIN_THROTTLE_ENABLED) clearLoginFailures(ip, emailNorm);
     setAuthCookies(res, data.accessToken, data.refreshToken);
     const u = data.user;
     const roleLabel = u.role === 'admin' ? 'admin' : 'user';
@@ -131,7 +142,7 @@ export async function login(req, res, next) {
   } catch (err) {
     const ip = getClientIp(req);
     const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
-    if (err?.code === 'INVALID_CREDENTIALS' && email) {
+    if (LOGIN_THROTTLE_ENABLED && err?.code === 'INVALID_CREDENTIALS' && email) {
       registerFailedLogin(ip, email);
     }
     return next(err);
@@ -186,12 +197,34 @@ export async function logout(req, res, next) {
  * GET /api/auth/session
  */
 export async function session(req, res) {
+  // `/api/auth/session` is used by frontends to restore login state after refresh.
+  // If the access token is expired/missing, we attempt a refresh-cookie rotation here
+  // so users don't get kicked to login after being idle.
+  let restored = false;
   if (!req.authUser) {
-    return res.status(401).json({
-      success: false,
-      message: 'Unauthorized',
-      code: 'UNAUTHORIZED',
-    });
+    try {
+      const refreshToken = readRefreshCookie(req);
+      if (!refreshToken) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+          code: 'UNAUTHORIZED',
+        });
+      }
+      const data = await authService.refreshSession(refreshToken);
+      setAuthCookies(res, data.accessToken, data.refreshToken);
+      req.authUser = data.user;
+      restored = true;
+    } catch {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized',
+        code: 'UNAUTHORIZED',
+      });
+    }
+  }
+  if (restored) {
+    req.logMessage = `Session restored`;
   }
   // Avoid cached / conditional responses for auth state; keeps session checks predictable.
   res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');

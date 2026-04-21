@@ -16,6 +16,7 @@ const inventoryRowSchema = z.object({
   color: z.string().trim().min(1).max(40),
   gsm: z.coerce.number().refine((n) => n === 180 || n === 210 || n === 240, { message: 'gsm must be 180, 210, or 240' }),
   qty: z.coerce.number().int().min(0),
+  reorderPoint: z.coerce.number().int().min(0).optional().default(5),
 });
 
 const categorySchema = z

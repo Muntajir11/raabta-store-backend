@@ -25,7 +25,7 @@ function getRefreshExpiryDate() {
   return date;
 }
 
-async function buildSession(user) {
+export async function buildSession(user) {
   const refreshJti = makeRefreshJti();
   const accessToken = signAccessToken(user);
   const refreshToken = signRefreshToken(user, refreshJti);
@@ -120,50 +120,35 @@ export async function refreshSession(refreshToken) {
   }
 
   const userId = payload.sub;
-  const jti = payload.jti;
-  if (typeof userId !== 'string' || typeof jti !== 'string') {
+  if (typeof userId !== 'string') {
     const err = new Error('Invalid session');
     err.statusCode = 401;
     err.code = 'INVALID_SESSION';
-    err.details = { reason: 'missing_sub_or_jti', context: 'refreshSession' };
+    err.details = { reason: 'missing_sub', context: 'refreshSession' };
     throw err;
   }
 
-  const user = await User.findById(userId).select(
-    '+refreshTokenHash +refreshTokenJti +refreshTokenExpiresAt'
-  );
-  if (!user || !user.refreshTokenHash || !user.refreshTokenJti || !user.refreshTokenExpiresAt) {
+  const user = await User.findById(userId);
+  if (!user) {
     const err = new Error('Session expired');
     err.statusCode = 401;
     err.code = 'SESSION_EXPIRED';
     err.details = {
-      reason: 'no_stored_refresh_session',
+      reason: 'user_not_found',
       userId,
       context: 'refreshSession',
     };
     throw err;
   }
 
-  const expectedHash = hashRefreshToken(refreshToken);
-  const isExpired = user.refreshTokenExpiresAt.getTime() < Date.now();
-  if (isExpired || user.refreshTokenJti !== jti || user.refreshTokenHash !== expectedHash) {
-    user.refreshTokenHash = null;
-    user.refreshTokenJti = null;
-    user.refreshTokenExpiresAt = null;
-    await user.save();
-
-    const err = new Error('Session expired');
-    err.statusCode = 401;
-    err.code = 'SESSION_EXPIRED';
-    err.details = {
-      reason: isExpired ? 'refresh_token_expired' : 'refresh_token_mismatch_or_revoked',
-      userId,
-      context: 'refreshSession',
-    };
-    throw err;
-  }
-
-  return buildSession(user);
+  // Important: do NOT rotate refresh tokens on every refresh.
+  // Rotation + concurrent refresh calls can revoke the session and clear cookies.
+  const accessToken = signAccessToken(user);
+  return {
+    user: toPublicUser(user),
+    accessToken,
+    refreshToken,
+  };
 }
 
 /**
@@ -194,4 +179,36 @@ export async function revokeSessionByRefreshToken(refreshToken) {
   const userId = payload.sub;
   if (typeof userId !== 'string') return;
   await revokeSessionForUser(userId);
+}
+
+/**
+ * @param {string} userId
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ */
+export async function updatePasswordAndRotateSession(userId, currentPassword, newPassword) {
+  const user = await User.findById(userId).select(
+    '+passwordHash +refreshTokenHash +refreshTokenJti +refreshTokenExpiresAt'
+  );
+  if (!user) {
+    const err = new Error('Unauthorized');
+    err.statusCode = 401;
+    err.code = 'UNAUTHORIZED';
+    err.details = { reason: 'user_not_found', context: 'updatePasswordAndRotateSession' };
+    throw err;
+  }
+
+  const match = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!match) {
+    const err = new Error('Current password is incorrect');
+    err.statusCode = 401;
+    err.code = 'INVALID_CREDENTIALS';
+    err.details = { reason: 'password_mismatch', userId, context: 'updatePasswordAndRotateSession' };
+    throw err;
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await user.save();
+
+  return buildSession(user);
 }

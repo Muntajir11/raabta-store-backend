@@ -6,6 +6,7 @@ import { Cart } from '../models/cart.model.js';
 import { Counter } from '../models/counter.model.js';
 import { Product } from '../models/product.model.js';
 import { PRODUCT_SECTIONS } from '../constants/productSections.js';
+import { computeEffectiveInventoryForProducts } from './inventoryLedger.service.js';
 
 const PRODUCT_CODE_COUNTER_ID = 'productCode';
 
@@ -120,7 +121,8 @@ function normalizeProduct(raw) {
 
 export async function listProducts() {
   const products = await Product.find({ isActive: true }).sort({ createdAt: 1, productId: 1 }).lean();
-  return products.map((item) => {
+  const withEffective = await computeEffectiveInventoryForProducts(products);
+  return withEffective.map((item) => {
     const normalized = normalizeProduct(item);
     const minPrice =
       normalized.gsmOptions.length > 0
@@ -143,6 +145,10 @@ export async function listProducts() {
         color: row.color,
         gsm: row.gsm,
         qty: row.qty,
+        baseQty: row.baseQty,
+        adjustmentsQty: row.adjustmentsQty,
+        effectiveQty: row.effectiveQty,
+        reorderPoint: row.reorderPoint,
       })),
     };
   });
@@ -151,7 +157,8 @@ export async function listProducts() {
 export async function getActiveProductByProductId(productId) {
   const product = await Product.findOne({ productId, isActive: true }).lean();
   if (!product) return null;
-  return normalizeProduct(product);
+  const [withEffective] = await computeEffectiveInventoryForProducts([product]);
+  return normalizeProduct(withEffective);
 }
 
 function isAllowedSection(category) {
