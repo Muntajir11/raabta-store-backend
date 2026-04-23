@@ -10,6 +10,7 @@ import { adminAuthRouter } from './adminAuth.routes.js';
 import { designRouter } from './design.routes.js';
 import { settingsRouter } from './settings.routes.js';
 import { checkoutRouter } from './checkout.routes.js';
+import { contactRouter } from './contact.routes.js';
 
 export const apiRouter = Router();
 
@@ -29,3 +30,4 @@ apiRouter.use('/reviews', reviewRouter);
 apiRouter.use('/me', meRouter);
 apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/checkout', checkoutRouter);
+apiRouter.use('/contact', contactRouter);

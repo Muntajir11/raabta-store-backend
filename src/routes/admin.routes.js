@@ -11,6 +11,7 @@ import * as adminDashboard from '../controllers/adminDashboard.controller.js';
 import * as adminDesign from '../controllers/adminDesign.controller.js';
 import * as adminInventoryLedger from '../controllers/adminInventoryLedger.controller.js';
 import * as adminSettings from '../controllers/adminSettings.controller.js';
+import * as adminSupport from '../controllers/adminSupport.controller.js';
 
 export const adminRouter = Router();
 
@@ -64,3 +65,7 @@ adminRouter.post('/products', csrfProtection, multerIfMultipart, adminProduct.cr
 adminRouter.patch('/products/:productId', csrfProtection, multerIfMultipart, adminProduct.update);
 adminRouter.patch('/products/:productId/toggle-active', csrfProtection, adminProduct.toggleActive);
 adminRouter.delete('/products/:productId', csrfProtection, adminProduct.remove);
+
+adminRouter.get('/support/tickets', adminSupport.list);
+adminRouter.get('/support/tickets/:ticketId', adminSupport.getOne);
+adminRouter.patch('/support/tickets/:ticketId', csrfProtection, adminSupport.patch);
