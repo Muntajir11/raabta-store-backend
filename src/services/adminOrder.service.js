@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Order } from '../models/order.model.js';
+import { InventoryAdjustment } from '../models/inventoryAdjustment.model.js';
 
 const ORDER_STATUSES = [
   'pending',
@@ -25,6 +26,7 @@ function orderListDto(o) {
     customerName: o.customerName || '',
     customerEmail: o.customerEmail || '',
     city: o.city || '',
+    paymentMethod: o.paymentMethod || 'cod',
     paymentStatus: o.paymentStatus,
     status: o.status,
     total: o.total,
@@ -42,13 +44,18 @@ function orderDetailDto(o) {
     items: o.items || [],
     subtotal: o.subtotal,
     shipping: o.shipping,
+    shippingExclGst: typeof o.shippingExclGst === 'number' ? o.shippingExclGst : null,
+    shippingGst: o.shippingGst || null,
     total: o.total,
+    paymentMethod: o.paymentMethod || 'cod',
     paymentStatus: o.paymentStatus,
     status: o.status,
     notes: o.notes || '',
     customerName: o.customerName || '',
     customerEmail: o.customerEmail || '',
     city: o.city || '',
+    shippingAddress: o.shippingAddress || null,
+    inventoryReserved: Boolean(o.inventoryReserved),
   };
 }
 
@@ -124,8 +131,9 @@ export async function getOrderAdmin(orderNumber) {
 /**
  * @param {string} orderNumber
  * @param {{ status?: string; paymentStatus?: string; notes?: string }} patch
+ * @param {{ userId?: string }} [actor]
  */
-export async function patchOrderAdmin(orderNumber, patch) {
+export async function patchOrderAdmin(orderNumber, patch, actor = {}) {
   const on = String(orderNumber || '').trim();
   if (!on) {
     const err = new Error('Order not found');
@@ -142,6 +150,14 @@ export async function patchOrderAdmin(orderNumber, patch) {
     throw err;
   }
 
+  const before = await Order.findOne({ orderNumber: on }).lean();
+  if (!before) {
+    const err = new Error('Order not found');
+    err.statusCode = 404;
+    err.code = 'ORDER_NOT_FOUND';
+    throw err;
+  }
+
   const updated = await Order.findOneAndUpdate(
     { orderNumber: on },
     { $set: patch },
@@ -154,6 +170,59 @@ export async function patchOrderAdmin(orderNumber, patch) {
     err.code = 'ORDER_NOT_FOUND';
     throw err;
   }
+
+  const actorUserId = String(actor?.userId || '').trim();
+  const statusChanged = typeof patch.status === 'string' && patch.status !== before.status;
+  if (actorUserId && statusChanged) {
+    // Reserve stock only when admin confirms the order.
+    if (patch.status === 'confirmed' && !before.inventoryReserved) {
+      const items = Array.isArray(before.items) ? before.items : [];
+      if (items.length) {
+        await InventoryAdjustment.insertMany(
+          items.map((i) => ({
+            productId: i.productId,
+            size: i.size,
+            color: i.color,
+            gsm: i.gsm,
+            delta: -Math.max(0, Number(i.qty) || 0),
+            reason: 'order',
+            note: `Reserved for order ${on}`,
+            createdBy: actorUserId,
+            refType: 'order',
+            refId: on,
+          })),
+          { ordered: true }
+        );
+        await Order.updateOne({ orderNumber: on }, { $set: { inventoryReserved: true } });
+        updated.inventoryReserved = true;
+      }
+    }
+
+    // If a previously-reserved order gets cancelled, restore stock.
+    if (patch.status === 'cancelled' && before.inventoryReserved) {
+      const items = Array.isArray(before.items) ? before.items : [];
+      if (items.length) {
+        await InventoryAdjustment.insertMany(
+          items.map((i) => ({
+            productId: i.productId,
+            size: i.size,
+            color: i.color,
+            gsm: i.gsm,
+            delta: Math.max(0, Number(i.qty) || 0),
+            reason: 'cancel',
+            note: `Restored from cancelled order ${on}`,
+            createdBy: actorUserId,
+            refType: 'order',
+            refId: on,
+          })),
+          { ordered: true }
+        );
+        await Order.updateOne({ orderNumber: on }, { $set: { inventoryReserved: false } });
+        updated.inventoryReserved = false;
+      }
+    }
+  }
+
   return orderDetailDto(updated);
 }
 

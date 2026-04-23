@@ -33,11 +33,15 @@ function asNonEmptyString(v) {
 
 function assertUserHasShipping(user) {
   const missing = [];
-  if (!asNonEmptyString(user?.phone)) missing.push('phone');
-  if (!asNonEmptyString(user?.address)) missing.push('address');
-  if (!asNonEmptyString(user?.city)) missing.push('city');
-  if (!asNonEmptyString(user?.state)) missing.push('state');
-  if (!asNonEmptyString(user?.pincode)) missing.push('pincode');
+  if (!asNonEmptyString(user?.shippingName)) missing.push('shippingName');
+  if (!asNonEmptyString(user?.shippingPhone)) missing.push('shippingPhone');
+  if (!asNonEmptyString(user?.shippingAddressLine1)) missing.push('shippingAddressLine1');
+  if (!asNonEmptyString(user?.shippingAddressLine2)) missing.push('shippingAddressLine2');
+  if (!asNonEmptyString(user?.shippingLandmark)) missing.push('shippingLandmark');
+  if (!asNonEmptyString(user?.shippingCity)) missing.push('shippingCity');
+  if (!asNonEmptyString(user?.shippingState)) missing.push('shippingState');
+  if (!asNonEmptyString(user?.shippingPincode)) missing.push('shippingPincode');
+  if (asNonEmptyString(user?.shippingCountry) !== 'India') missing.push('shippingCountry');
   if (missing.length) {
     const err = new Error('Complete your address to continue');
     err.statusCode = 400;
@@ -135,6 +139,7 @@ function isPrepaidServiceable(serviceabilityBody) {
 
 /**
  * @param {string} userId
+ * @param {{ paymentType?: 'Prepaid'|'COD' }} [opts]
  * @returns {Promise<{
  *  subtotal: number;
  *  shipping: number;
@@ -146,7 +151,11 @@ function isPrepaidServiceable(serviceabilityBody) {
  *  provider: 'delhivery'|'fallback';
  * }>}
  */
-export async function quoteShippingForUser(userId) {
+export async function quoteShippingForUser(userId, opts = {}) {
+  const paymentTypeUi = String(opts?.paymentType || 'Prepaid').trim();
+  /** @type {'Prepaid'|'COD'} */
+  const paymentType = paymentTypeUi === 'COD' ? 'COD' : 'Prepaid';
+
   const [cart, user, settings] = await Promise.all([
     getCartByUserId(userId),
     User.findById(userId).lean(),
@@ -173,6 +182,7 @@ export async function quoteShippingForUser(userId) {
   const destPin = asNonEmptyString(user?.pincode);
   const itemCount = Math.max(0, Math.floor(Number(cart?.totalItems || 0)));
   const subtotal = Math.max(0, Number(cart?.subtotal || 0));
+  const codAmount = paymentType === 'COD' ? Math.max(0, Math.floor(subtotal)) : 0;
 
   if (itemCount <= 0) {
     const err = new Error('Your cart is empty');
@@ -192,7 +202,7 @@ export async function quoteShippingForUser(userId) {
   });
   const dims = dimsForDelhivery(dimsCm);
 
-  const cacheKey = `v2|${originPin}|${destPin}|${chargeableGrams}|${dims ? `${dims.lengthCm}x${dims.breadthCm}x${dims.heightCm}` : 'nodims'}`;
+  const cacheKey = `v3|pt=${paymentType}|cod=${codAmount}|${originPin}|${destPin}|${chargeableGrams}|${dims ? `${dims.lengthCm}x${dims.breadthCm}x${dims.heightCm}` : 'nodims'}`;
   const cached = cacheGet(cacheKey);
   if (cached) {
     return {
@@ -238,8 +248,8 @@ export async function quoteShippingForUser(userId) {
       originPin,
       destPin,
       weightGrams: chargeableGrams,
-      paymentType: 'Pre-paid',
-      codAmount: 0,
+      paymentType: paymentType === 'COD' ? 'COD' : 'Pre-paid',
+      codAmount,
       ...(dims
         ? {
             lengthCm: dims.lengthCm,

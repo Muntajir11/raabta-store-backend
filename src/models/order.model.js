@@ -4,6 +4,8 @@ const orderItemSchema = new mongoose.Schema(
   {
     productId: { type: String, required: true, trim: true, maxlength: 120 },
     name: { type: String, required: true, trim: true, maxlength: 160 },
+    image: { type: String, trim: true, maxlength: 2048, default: '' },
+    category: { type: String, trim: true, maxlength: 80, default: '' },
     size: { type: String, required: true, trim: true, maxlength: 20 },
     color: { type: String, required: true, trim: true, maxlength: 60 },
     gsm: { type: Number, required: true, enum: [180, 210, 240] },
@@ -33,7 +35,19 @@ const orderSchema = new mongoose.Schema(
     items: { type: [orderItemSchema], default: [] },
     subtotal: { type: Number, required: true, min: 0 },
     shipping: { type: Number, required: true, min: 0 },
+    shippingExclGst: { type: Number, min: 0, default: null },
+    shippingGst: {
+      cgst: { type: Number, min: 0, default: null },
+      sgst: { type: Number, min: 0, default: null },
+      igst: { type: Number, min: 0, default: null },
+    },
     total: { type: Number, required: true, min: 0 },
+    paymentMethod: {
+      type: String,
+      enum: ['cod', 'prepaid'],
+      default: 'cod',
+      index: true,
+    },
     paymentStatus: {
       type: String,
       enum: ['unpaid', 'paid', 'refunded'],
@@ -48,6 +62,15 @@ const orderSchema = new mongoose.Schema(
     customerName: { type: String, trim: true, maxlength: 120, default: '' },
     customerEmail: { type: String, trim: true, maxlength: 254, default: '' },
     city: { type: String, trim: true, maxlength: 120, default: '' },
+    shippingAddress: {
+      phone: { type: String, trim: true, maxlength: 30, default: '' },
+      address: { type: String, trim: true, maxlength: 400, default: '' },
+      city: { type: String, trim: true, maxlength: 120, default: '' },
+      state: { type: String, trim: true, maxlength: 120, default: '' },
+      pincode: { type: String, trim: true, maxlength: 6, default: '' },
+      landmark: { type: String, trim: true, maxlength: 200, default: '' },
+    },
+    inventoryReserved: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

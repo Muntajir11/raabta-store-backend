@@ -83,6 +83,8 @@ async function main() {
     pt: 'Pre-paid',
   };
 
+  const COD_AMOUNT = 999;
+
   // Scenario A: cgm only, no dims (server-declared chargeable weight)
   await call(PROD, { ...base, cgm: 250 }, 'PROD cgm=250 (no dims)');
 
@@ -108,6 +110,20 @@ async function main() {
     PROD,
     { ...base, md: 'S', cgm: 250, l: 30, b: 35, h: 5, pkg_type: 'box' },
     'PROD Surface md=S cgm=250 + l/b/h 30x35x5'
+  );
+
+  // Scenario F: COD uplift (same as Scenario C but pt=COD + cod amount)
+  await call(
+    PROD,
+    { ...base, pt: 'COD', cod: COD_AMOUNT, cgm: 250, l: 30, b: 35, h: 5, pkg_type: 'box' },
+    `PROD COD pt=COD cod=${COD_AMOUNT} cgm=250 + l/b/h 30x35x5`
+  );
+
+  // Scenario G: COD uplift (no dims)
+  await call(
+    PROD,
+    { ...base, pt: 'COD', cod: COD_AMOUNT, cgm: 250 },
+    `PROD COD pt=COD cod=${COD_AMOUNT} cgm=250 (no dims)`
   );
 }
 

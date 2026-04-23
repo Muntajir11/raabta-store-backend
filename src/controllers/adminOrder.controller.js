@@ -36,7 +36,7 @@ export async function patch(req, res, next) {
       });
     }
 
-    const data = await adminOrderService.patchOrderAdmin(orderNumber, parsed.data);
+    const data = await adminOrderService.patchOrderAdmin(orderNumber, parsed.data, { userId: req.authUser?.id });
     req.logMessage = `${req.authUser?.name || 'Admin'} updated order ${orderNumber}`;
     return res.status(200).json({ success: true, data });
   } catch (err) {

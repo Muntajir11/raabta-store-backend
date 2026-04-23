@@ -16,6 +16,8 @@ function toPublicUser(doc) {
     name: doc.name,
     email: doc.email,
     role: doc.role || 'user',
+    gender: doc.gender || '',
+    avatarSeed: doc.avatarSeed || '',
   };
 }
 
@@ -41,7 +43,7 @@ export async function buildSession(user) {
 }
 
 /**
- * @param {{ name: string; email: string; password: string }} input
+ * @param {{ name: string; email: string; password: string; gender: 'male'|'female' }} input
  */
 export async function registerUser(input) {
   const emailNorm = input.email.toLowerCase().trim();
@@ -55,10 +57,14 @@ export async function registerUser(input) {
   }
 
   const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+  const gender = input.gender === 'female' ? 'female' : 'male';
+  const avatarSeed = `${gender}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
   const user = await User.create({
     name: input.name.trim(),
     email: emailNorm,
     passwordHash,
+    gender,
+    avatarSeed,
   });
 
   return buildSession(user);

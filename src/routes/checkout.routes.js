@@ -6,4 +6,5 @@ import * as checkout from '../controllers/checkout.controller.js';
 export const checkoutRouter = Router();
 
 checkoutRouter.post('/quote', requireAuth, csrfProtection, checkout.quote);
+checkoutRouter.post('/place', requireAuth, csrfProtection, checkout.place);
 

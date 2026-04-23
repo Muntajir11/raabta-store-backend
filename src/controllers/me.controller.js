@@ -21,30 +21,37 @@ function stripEmptyStrings(obj) {
 const profilePatchSchema = z
   .object({
     name: z.string().trim().min(1, 'Name is required').max(120).optional(),
-    phone: z
-      .string()
-      .trim()
-      .regex(PHONE_REGEX, 'Enter a valid phone number')
-      .optional(),
-    address: z.string().trim().min(5, 'Street address is required').max(500).optional(),
-    city: z.string().trim().min(2, 'City is required').max(120).optional(),
-    state: z
+    gender: z.enum(['male', 'female']).optional(),
+    marketingOptIn: z.boolean().optional(),
+
+    shippingName: z.string().trim().min(2, 'Full name is required').max(120).optional(),
+    shippingPhone: z.string().trim().regex(PHONE_REGEX, 'Enter a valid phone number').optional(),
+    shippingAddressLine1: z.string().trim().min(2, 'Address line 1 is required').max(200).optional(),
+    shippingAddressLine2: z.string().trim().min(2, 'Address line 2 is required').max(200).optional(),
+    shippingLandmark: z.string().trim().min(2, 'Landmark is required').max(120).optional(),
+    shippingPincode: z.string().trim().regex(PINCODE_REGEX, 'Enter a valid pincode').optional(),
+    shippingCity: z.string().trim().min(2, 'City is required').max(120).optional(),
+    shippingState: z
       .string()
       .trim()
       .refine((v) => INDIAN_STATES.includes(v), 'State is required')
       .optional(),
-    pincode: z
-      .string()
-      .trim()
-      .regex(PINCODE_REGEX, 'Enter a valid pincode')
-      .optional(),
-    landmark: z.string().trim().max(120).optional(),
-    gender: z.string().trim().max(32).optional(),
-    marketingOptIn: z.boolean().optional(),
+    shippingCountry: z.literal('India').optional(),
+    deliveryInstructions: z.string().trim().max(500).optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
-    const addressKeys = ['address', 'city', 'state', 'pincode', 'phone'];
+    const addressKeys = [
+      'shippingName',
+      'shippingPhone',
+      'shippingAddressLine1',
+      'shippingAddressLine2',
+      'shippingLandmark',
+      'shippingPincode',
+      'shippingCity',
+      'shippingState',
+      'shippingCountry',
+    ];
     const hasAnyAddressField = addressKeys.some((k) => data[k] !== undefined);
     if (!hasAnyAddressField) return;
 
@@ -154,6 +161,50 @@ export async function patchPassword(req, res, next) {
     setAuthCookies(res, data.accessToken, data.refreshToken);
     req.logMessage = `${data.user.name} changed password`;
     return res.status(200).json({ success: true, data: { user: data.user } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function listOrders(req, res, next) {
+  try {
+    const userId = req.authUser?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 30;
+    const data = await meService.listMyOrders(userId, { page, limit });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function getOrder(req, res, next) {
+  try {
+    const userId = req.authUser?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    const orderNumber = req.params.orderNumber;
+    const data = await meService.getMyOrder(userId, orderNumber);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function cancelOrder(req, res, next) {
+  try {
+    const userId = req.authUser?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    const orderNumber = req.params.orderNumber;
+    const data = await meService.cancelMyOrder(userId, orderNumber);
+    req.logMessage = `${req.authUser?.name || 'User'} cancelled order ${orderNumber}`;
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     return next(err);
   }
