@@ -16,7 +16,10 @@ async function main() {
   const port = Number(process.env.PORT || 5000);
   const mongoUri = process.env.MONGODB_URI;
   const corsOriginRaw =
-    process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174';
+    process.env.ADMIN_ORIGIN ||
+    process.env.STOREFRONT_ORIGIN ||
+    process.env.CORS_ORIGIN ||
+    'http://localhost:5173,http://localhost:5174';
   const corsAllowedOrigins = corsOriginRaw
     .split(',')
     .map((o) => o.trim())
@@ -39,6 +42,9 @@ async function main() {
 
   console.log(`[bootstrap] Starting API in ${nodeEnv} mode`);
   console.log(`[bootstrap] CORS allowed origins: ${corsAllowedOrigins.join(', ')}`);
+  if (nodeEnv === 'production' && corsAllowedOrigins.length === 0) {
+    throw new Error('CORS allowed origins list is empty in production');
+  }
   console.log(`[bootstrap] Connecting to MongoDB`);
   await mongoose.connect(mongoUri);
   console.log(`[bootstrap] MongoDB connected`);
@@ -52,17 +58,38 @@ async function main() {
 
   const app = express();
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "img-src": ["'self'", 'https://res.cloudinary.com', 'data:'],
+          "connect-src": ["'self'"],
+        },
+      },
+    })
+  );
+
+  // Health check should be callable by non-browser clients (no Origin header).
+  // Mount it before CORS so strict CORS doesn't block it.
+  app.post('/api/health', (_req, res) => {
+    res.json({ ok: true });
+  });
+
   app.use(
     cors({
       origin(origin, callback) {
+        // Browsers always send Origin for XHR/fetch CORS requests.
+        // In local dev, Vite proxy + some tools may omit Origin; allow it.
+        // In production, reject missing Origin to keep CORS strict.
         if (!origin) {
-          return callback(null, true);
+          if (nodeEnv !== 'production') return callback(null, true);
+          return callback(new Error('CORS'), false);
         }
         if (corsAllowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        return callback(null, false);
+        return callback(new Error('CORS'), false);
       },
       credentials: true,
     })
@@ -89,6 +116,7 @@ async function main() {
       legacyHeaders: false,
     });
     app.use('/api/auth', authLimiter);
+    app.use('/api/admin/auth', authLimiter);
   }
 
   app.use('/api', apiRouter);

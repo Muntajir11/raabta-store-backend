@@ -6,6 +6,7 @@ import {
   setAuthCookies,
 } from '../lib/authTokens.js';
 import { formatErrorLogPrefix, getClientIp } from '../lib/requestLog.js';
+import { createLoginThrottle } from '../lib/loginThrottle.js';
 
 const registerSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -24,63 +25,7 @@ function formatZodError(error) {
   return first?.message ?? 'Validation failed';
 }
 
-// Login throttle is useful in production, but painful during development/testing.
-// Enable it by default only in production; can be forced via LOGIN_THROTTLE_ENABLED=true/false.
-const LOGIN_THROTTLE_ENABLED =
-  process.env.LOGIN_THROTTLE_ENABLED === 'true'
-    ? true
-    : process.env.LOGIN_THROTTLE_ENABLED === 'false'
-      ? false
-      : process.env.NODE_ENV === 'production';
-
-const MAX_FAILURES_PER_IP = 10;
-const MAX_FAILURES_PER_EMAIL = 5;
-const LOCK_MS = 15 * 60 * 1000;
-const ipFailures = new Map();
-const emailFailures = new Map();
-
-function getFailureEntry(store, key) {
-  const now = Date.now();
-  const current = store.get(key);
-  if (!current || current.lockedUntil < now) {
-    const fresh = { count: 0, lockedUntil: 0 };
-    store.set(key, fresh);
-    return fresh;
-  }
-  return current;
-}
-
-function registerFailedLogin(ip, email) {
-  const now = Date.now();
-
-  const ipEntry = getFailureEntry(ipFailures, ip);
-  ipEntry.count += 1;
-  if (ipEntry.count >= MAX_FAILURES_PER_IP) {
-    ipEntry.lockedUntil = now + LOCK_MS;
-  }
-
-  const emailEntry = getFailureEntry(emailFailures, email);
-  emailEntry.count += 1;
-  if (emailEntry.count >= MAX_FAILURES_PER_EMAIL) {
-    emailEntry.lockedUntil = now + LOCK_MS;
-  }
-}
-
-function clearLoginFailures(ip, email) {
-  ipFailures.delete(ip);
-  emailFailures.delete(email);
-}
-
-function getLockInfo(ip, email) {
-  const now = Date.now();
-  const ipEntry = ipFailures.get(ip);
-  const emailEntry = emailFailures.get(email);
-  const ipRemaining = ipEntry && ipEntry.lockedUntil > now ? ipEntry.lockedUntil - now : 0;
-  const emailRemaining =
-    emailEntry && emailEntry.lockedUntil > now ? emailEntry.lockedUntil - now : 0;
-  const remainingMs = Math.max(ipRemaining, emailRemaining);
-  return { locked: remainingMs > 0, remainingMs };
-}
+const loginThrottle = createLoginThrottle();
 
 /**
  * POST /api/auth/register
@@ -96,7 +41,7 @@ export async function register(req, res, next) {
       });
     }
     const data = await authService.registerUser(parsed.data);
-    setAuthCookies(res, data.accessToken, data.refreshToken);
+    setAuthCookies(req, res, data.accessToken, data.refreshToken);
     const u = data.user;
     const roleLabel = u.role === 'admin' ? 'admin' : 'user';
     req.logMessage = `${u.name} registered and signed in as ${roleLabel} (${u.email})`;
@@ -121,31 +66,26 @@ export async function login(req, res, next) {
     }
     const ip = getClientIp(req);
     const emailNorm = parsed.data.email.toLowerCase().trim();
-    if (LOGIN_THROTTLE_ENABLED) {
-      const lock = getLockInfo(ip, emailNorm);
-      if (lock.locked) {
-        return res.status(429).json({
-          success: false,
-          message: 'Too many failed login attempts. Please try again later.',
-          code: 'LOGIN_THROTTLED',
-          retryAfterSeconds: Math.ceil(lock.remainingMs / 1000),
-        });
-      }
+    const lock = loginThrottle.check(req, emailNorm);
+    if (lock.locked) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed login attempts. Please try again later.',
+        code: 'LOGIN_THROTTLED',
+        retryAfterSeconds: Math.ceil(lock.remainingMs / 1000),
+      });
     }
 
     const data = await authService.loginUser(parsed.data);
-    if (LOGIN_THROTTLE_ENABLED) clearLoginFailures(ip, emailNorm);
-    setAuthCookies(res, data.accessToken, data.refreshToken);
+    loginThrottle.onSuccess(req, emailNorm);
+    setAuthCookies(req, res, data.accessToken, data.refreshToken);
     const u = data.user;
     const roleLabel = u.role === 'admin' ? 'admin' : 'user';
     req.logMessage = `${u.name} logged in as ${roleLabel} (${u.email})`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
-    const ip = getClientIp(req);
     const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
-    if (LOGIN_THROTTLE_ENABLED && err?.code === 'INVALID_CREDENTIALS' && email) {
-      registerFailedLogin(ip, email);
-    }
+    if (err?.code === 'INVALID_CREDENTIALS' && email) loginThrottle.onFailure(req, email);
     return next(err);
   }
 }
@@ -168,11 +108,11 @@ export async function refresh(req, res, next) {
     }
 
     const data = await authService.refreshSession(refreshToken);
-    setAuthCookies(res, data.accessToken, data.refreshToken);
+    setAuthCookies(req, res, data.accessToken, data.refreshToken);
     req.logMessage = `Session refreshed for ${data.user.email} (${data.user.role === 'admin' ? 'admin' : 'user'})`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
-    clearAuthCookies(res);
+    clearAuthCookies(req, res);
     return next(err);
   }
 }
@@ -186,10 +126,10 @@ export async function logout(req, res, next) {
     if (refreshToken) {
       await authService.revokeSessionByRefreshToken(refreshToken);
     }
-    clearAuthCookies(res);
+    clearAuthCookies(req, res);
     return res.status(200).json({ success: true });
   } catch (err) {
-    clearAuthCookies(res);
+    clearAuthCookies(req, res);
     return next(err);
   }
 }
@@ -198,34 +138,13 @@ export async function logout(req, res, next) {
  * GET /api/auth/session
  */
 export async function session(req, res) {
-  // `/api/auth/session` is used by frontends to restore login state after refresh.
-  // If the access token is expired/missing, we attempt a refresh-cookie rotation here
-  // so users don't get kicked to login after being idle.
-  let restored = false;
+  // Session endpoint must be idempotent (no cookie mutation).
   if (!req.authUser) {
-    try {
-      const refreshToken = readRefreshCookie(req);
-      if (!refreshToken) {
-        return res.status(401).json({
-          success: false,
-          message: 'Unauthorized',
-          code: 'UNAUTHORIZED',
-        });
-      }
-      const data = await authService.refreshSession(refreshToken);
-      setAuthCookies(res, data.accessToken, data.refreshToken);
-      req.authUser = data.user;
-      restored = true;
-    } catch {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized',
-        code: 'UNAUTHORIZED',
-      });
-    }
-  }
-  if (restored) {
-    req.logMessage = `Session restored`;
+    return res.status(401).json({
+      success: false,
+      message: 'Unauthorized',
+      code: 'UNAUTHORIZED',
+    });
   }
   // Avoid cached / conditional responses for auth state; keeps session checks predictable.
   res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');

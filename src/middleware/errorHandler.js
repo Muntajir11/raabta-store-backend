@@ -1,5 +1,24 @@
 import { formatErrorLogPrefix } from '../lib/requestLog.js';
 
+function redactDetails(value) {
+  if (!value || typeof value !== 'object') return value;
+  const out = Array.isArray(value) ? [] : {};
+  for (const [k, v] of Object.entries(value)) {
+    const key = String(k).toLowerCase();
+    if (
+      key.includes('email') ||
+      key.includes('phone') ||
+      key.includes('password') ||
+      key.includes('token')
+    ) {
+      out[k] = '[redacted]';
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
 /**
  * First stack frame outside node_modules (file:line:col) for tracing.
  * @param {string | undefined} stack
@@ -38,7 +57,7 @@ export function errorHandler(err, req, res, _next) {
   let detailsPart = '';
   if (err.details != null && typeof err.details === 'object') {
     try {
-      detailsPart = ` | details=${JSON.stringify(err.details)}`;
+      detailsPart = ` | details=${JSON.stringify(redactDetails(err.details))}`;
     } catch {
       detailsPart = ' | details=(unserializable)';
     }

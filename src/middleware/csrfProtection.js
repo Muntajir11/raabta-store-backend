@@ -2,17 +2,29 @@ function normalizeOrigin(value) {
   return value.trim().replace(/\/$/, '').toLowerCase();
 }
 
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
 function getTrustedOrigins() {
+  const adminOrigin = process.env.ADMIN_ORIGIN;
+  const storefrontOrigin = process.env.STOREFRONT_ORIGIN;
   const configured = process.env.CSRF_TRUSTED_ORIGINS;
   const fallback = process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174';
-  const raw = configured && configured.trim() ? configured : fallback;
+  const sources = [
+    ...splitCsv(adminOrigin),
+    ...splitCsv(storefrontOrigin),
+    ...splitCsv(configured && configured.trim() ? configured : ''),
+    ...splitCsv(fallback),
+  ];
 
   return new Set(
-    raw
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean)
+    sources
       .map(normalizeOrigin)
+      .filter((o) => o && o !== 'null' && !o.includes('*'))
   );
 }
 

@@ -30,8 +30,8 @@ async function getMaxNumericProductId() {
 /**
  * Next unique numeric string product id (single atomic update; safe under concurrency).
  */
-export async function getNextProductCode() {
-  const exists = await Counter.exists({ _id: PRODUCT_CODE_COUNTER_ID });
+export async function getNextProductCode({ session } = {}) {
+  const exists = await Counter.exists({ _id: PRODUCT_CODE_COUNTER_ID }).session(session || null);
   const boot = exists ? 0 : await getMaxNumericProductId();
   const updated = await Counter.findOneAndUpdate(
     { _id: PRODUCT_CODE_COUNTER_ID },
@@ -44,7 +44,7 @@ export async function getNextProductCode() {
         },
       },
     ],
-    { upsert: true, new: true }
+    { upsert: true, new: true, ...(session ? { session } : {}) }
   ).lean();
   if (!updated || typeof updated.seq !== 'number') {
     const err = new Error('Failed to allocate product code');

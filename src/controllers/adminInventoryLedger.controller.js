@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import * as adminInventoryLedgerService from '../services/adminInventoryLedger.service.js';
 import { InventoryAdjustment } from '../models/inventoryAdjustment.model.js';
+import { Product } from '../models/product.model.js';
 
 const adjustSchema = z
   .object({
@@ -23,7 +24,9 @@ export async function listProducts(req, res, next) {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q : '';
     const lowOnly = req.query.lowOnly === 'true' || req.query.lowOnly === '1';
-    const data = await adminInventoryLedgerService.listInventoryProductsAdmin({ q, lowOnly });
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : Number(req.query.page);
+    const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : Number(req.query.limit);
+    const data = await adminInventoryLedgerService.listInventoryProductsAdmin({ q, lowOnly, page, limit });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return next(err);
@@ -47,6 +50,25 @@ export async function adjust(req, res, next) {
     }
 
     const body = parsed.data;
+
+    const exists = await Product.exists({
+      productId: body.productId,
+      inventory: {
+        $elemMatch: {
+          size: body.size,
+          color: body.color,
+          gsm: body.gsm,
+        },
+      },
+    });
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        message: 'Variant not found on this product',
+        code: 'NOT_FOUND',
+      });
+    }
+
     const doc = await InventoryAdjustment.create({
       productId: body.productId,
       size: body.size,

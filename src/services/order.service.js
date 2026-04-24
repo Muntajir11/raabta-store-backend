@@ -12,11 +12,11 @@ function pad(num, width) {
   return s.length >= width ? s : '0'.repeat(width - s.length) + s;
 }
 
-async function allocateNextOrderNumber() {
+async function allocateNextOrderNumber({ session } = {}) {
   const updated = await Counter.findOneAndUpdate(
     { _id: ORDER_NUMBER_COUNTER_ID },
     { $inc: { seq: 1 } },
-    { upsert: true, new: true }
+    { upsert: true, new: true, ...(session ? { session } : {}) }
   ).lean();
 
   const seq = Number(updated?.seq || 0);
@@ -94,7 +94,7 @@ async function placeCodOrderInternal(userId, session) {
   const sgst = findAmount('sgst');
   const igst = findAmount('igst');
 
-  const orderNumber = await allocateNextOrderNumber();
+  const orderNumber = await allocateNextOrderNumber({ session });
   const orderItems = cartItems.map((i) => ({
     productId: String(i.productId || '').trim(),
     name: String(i.name || '').trim(),

@@ -109,7 +109,7 @@ export async function listCustomersAdmin(filters = {}) {
 /**
  * @param {string} userId
  */
-export async function getCustomerDetailAdmin(userId) {
+export async function getCustomerDetailAdmin(userId, input = {}) {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     const err = new Error('Invalid user id');
     err.statusCode = 400;
@@ -128,7 +128,14 @@ export async function getCustomerDetailAdmin(userId) {
     throw err;
   }
 
-  const orders = await Order.find({ userId: user._id }).sort({ createdAt: -1 }).lean();
+  const page = Math.max(1, Math.floor(Number(input.page || 1)));
+  const limit = Math.max(1, Math.min(100, Math.floor(Number(input.limit || 50))));
+  const skip = (page - 1) * limit;
+
+  const [orders, total] = await Promise.all([
+    Order.find({ userId: user._id }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Order.countDocuments({ userId: user._id }),
+  ]);
 
   return {
     user: {
@@ -138,6 +145,11 @@ export async function getCustomerDetailAdmin(userId) {
       address: nullIfEmpty(user.address),
       gender: nullIfEmpty(user.gender),
     },
-    orders: orders.map(orderDto),
+    orders: {
+      items: orders.map(orderDto),
+      page,
+      limit,
+      total,
+    },
   };
 }

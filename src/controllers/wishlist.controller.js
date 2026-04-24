@@ -55,13 +55,9 @@ export async function add(req, res, next) {
       return res.status(404).json({ success: false, message: 'Product not found', code: 'NOT_FOUND' });
     }
 
-    const user = await User.findById(userId).select('wishlist');
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Unauthorized', code: 'UNAUTHORIZED' });
-    }
-    const nextWishlist = uniqStrings([...(user.wishlist || []), productId]);
-    user.wishlist = nextWishlist;
-    await user.save();
+    await User.updateOne({ _id: userId }, { $addToSet: { wishlist: productId } });
+    const user = await User.findById(userId).select('wishlist').lean();
+    const nextWishlist = uniqStrings(user?.wishlist || []);
 
     req.logMessage = `${req.authUser?.name || 'a user'} added product ${productId} to wishlist`;
     return res.status(200).json({ success: true, data: { items: nextWishlist } });
@@ -81,13 +77,9 @@ export async function remove(req, res, next) {
       return res.status(400).json({ success: false, message: 'productId is required', code: 'VALIDATION_ERROR' });
     }
 
-    const user = await User.findById(userId).select('wishlist');
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Unauthorized', code: 'UNAUTHORIZED' });
-    }
-    const nextWishlist = uniqStrings((user.wishlist || []).filter((id) => id !== productId));
-    user.wishlist = nextWishlist;
-    await user.save();
+    await User.updateOne({ _id: userId }, { $pull: { wishlist: productId } });
+    const user = await User.findById(userId).select('wishlist').lean();
+    const nextWishlist = uniqStrings(user?.wishlist || []);
 
     req.logMessage = `${req.authUser?.name || 'a user'} removed product ${productId} from wishlist`;
     return res.status(200).json({ success: true, data: { items: nextWishlist } });

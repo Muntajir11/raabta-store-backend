@@ -158,7 +158,7 @@ export async function patchPassword(req, res, next) {
     }
 
     const data = await authService.updatePasswordAndRotateSession(userId, currentPassword, newPassword);
-    setAuthCookies(res, data.accessToken, data.refreshToken);
+    setAuthCookies(req, res, data.accessToken, data.refreshToken);
     req.logMessage = `${data.user.name} changed password`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {

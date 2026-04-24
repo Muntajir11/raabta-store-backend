@@ -10,12 +10,37 @@ function requireEnv(name) {
   return value;
 }
 
-function getCookieBaseOptions() {
+function isRequestSecure(req) {
+  if (!req) return null;
+  if (req.secure === true) return true;
+  const xfProto = req.get?.('x-forwarded-proto');
+  if (typeof xfProto === 'string' && xfProto.toLowerCase().includes('https')) return true;
+  return false;
+}
+
+function getCookieBaseOptions(req) {
   const isProduction = process.env.NODE_ENV === 'production';
+  const sameSiteRaw = String(process.env.COOKIE_SAMESITE || (isProduction ? 'lax' : 'lax'))
+    .trim()
+    .toLowerCase();
+  const sameSite =
+    sameSiteRaw === 'none' || sameSiteRaw === 'lax' || sameSiteRaw === 'strict'
+      ? sameSiteRaw
+      : 'lax';
+  const secureRaw = String(process.env.COOKIE_SECURE || (isProduction ? 'true' : 'false'))
+    .trim()
+    .toLowerCase();
+  const secure =
+    secureRaw === 'auto'
+      ? (isRequestSecure(req) ?? (isProduction ? true : false))
+      : secureRaw === 'true';
+  if (sameSite === 'none' && !secure) {
+    throw new Error('COOKIE_SECURE must be true when COOKIE_SAMESITE=none');
+  }
   return {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax',
+    secure,
+    sameSite,
     path: '/',
   };
 }
@@ -77,8 +102,8 @@ export function makeAuthCookieHelpers(prefix = '') {
   return {
     accessCookieName: names.access,
     refreshCookieName: names.refresh,
-    setAuthCookies(res, accessToken, refreshToken) {
-      const base = getCookieBaseOptions();
+    setAuthCookies(req, res, accessToken, refreshToken) {
+      const base = getCookieBaseOptions(req);
       res.cookie(names.access, accessToken, {
         ...base,
         maxAge: getAccessMaxAgeMs(),
@@ -88,8 +113,8 @@ export function makeAuthCookieHelpers(prefix = '') {
         maxAge: getRefreshMaxAgeMs(),
       });
     },
-    clearAuthCookies(res) {
-      const base = getCookieBaseOptions();
+    clearAuthCookies(req, res) {
+      const base = getCookieBaseOptions(req);
       res.clearCookie(names.access, base);
       res.clearCookie(names.refresh, base);
     },
@@ -102,8 +127,8 @@ export function makeAuthCookieHelpers(prefix = '') {
   };
 }
 
-export function setAuthCookies(res, accessToken, refreshToken) {
-  const base = getCookieBaseOptions();
+export function setAuthCookies(req, res, accessToken, refreshToken) {
+  const base = getCookieBaseOptions(req);
   res.cookie(ACCESS_COOKIE, accessToken, {
     ...base,
     maxAge: getAccessMaxAgeMs(),
@@ -114,8 +139,8 @@ export function setAuthCookies(res, accessToken, refreshToken) {
   });
 }
 
-export function clearAuthCookies(res) {
-  const base = getCookieBaseOptions();
+export function clearAuthCookies(req, res) {
+  const base = getCookieBaseOptions(req);
   res.clearCookie(ACCESS_COOKIE, base);
   res.clearCookie(REFRESH_COOKIE, base);
 }

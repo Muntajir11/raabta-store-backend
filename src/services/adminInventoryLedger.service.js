@@ -55,6 +55,9 @@ async function reservedByVariant() {
 export async function listInventoryProductsAdmin(input = {}) {
   const q = typeof input.q === 'string' ? input.q.trim() : '';
   const lowOnly = Boolean(input.lowOnly);
+  const page = Math.max(1, Math.floor(Number(input.page || 1)));
+  const limit = Math.max(1, Math.min(100, Math.floor(Number(input.limit || 30))));
+  const skip = (page - 1) * limit;
 
   const query = { isActive: true };
   if (q) {
@@ -62,10 +65,15 @@ export async function listInventoryProductsAdmin(input = {}) {
     query.$or = [{ productId: rx }, { name: rx }, { category: rx }];
   }
 
-  const products = await Product.find(query)
-    .select('productId name category inventory updatedAt')
-    .sort({ updatedAt: -1, productId: 1 })
-    .lean();
+  const [products, total] = await Promise.all([
+    Product.find(query)
+      .select('productId name category inventory updatedAt')
+      .sort({ updatedAt: -1, productId: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Product.countDocuments(query),
+  ]);
 
   const withEffective = await computeEffectiveInventoryForProducts(products);
   const reservedMap = await reservedByVariant();
@@ -128,7 +136,7 @@ export async function listInventoryProductsAdmin(input = {}) {
     })
     .filter(Boolean);
 
-  return { items };
+  return { items, page, limit, total };
 }
 
 /**

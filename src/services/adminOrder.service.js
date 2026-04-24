@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import mongoose from 'mongoose';
 import { Order } from '../models/order.model.js';
 import { InventoryAdjustment } from '../models/inventoryAdjustment.model.js';
 
@@ -150,34 +151,38 @@ export async function patchOrderAdmin(orderNumber, patch, actor = {}) {
     throw err;
   }
 
-  const before = await Order.findOne({ orderNumber: on }).lean();
-  if (!before) {
-    const err = new Error('Order not found');
-    err.statusCode = 404;
-    err.code = 'ORDER_NOT_FOUND';
-    throw err;
-  }
-
-  const updated = await Order.findOneAndUpdate(
-    { orderNumber: on },
-    { $set: patch },
-    { new: true }
-  ).lean();
-
-  if (!updated) {
-    const err = new Error('Order not found');
-    err.statusCode = 404;
-    err.code = 'ORDER_NOT_FOUND';
-    throw err;
-  }
-
   const actorUserId = String(actor?.userId || '').trim();
-  const statusChanged = typeof patch.status === 'string' && patch.status !== before.status;
-  if (actorUserId && statusChanged) {
-    // Reserve stock only when admin confirms the order.
-    if (patch.status === 'confirmed' && !before.inventoryReserved) {
+  const session = await mongoose.startSession();
+  try {
+    let updated;
+    await session.withTransaction(async () => {
+      const before = await Order.findOne({ orderNumber: on }).session(session).lean();
+      if (!before) {
+        const err = new Error('Order not found');
+        err.statusCode = 404;
+        err.code = 'ORDER_NOT_FOUND';
+        throw err;
+      }
+
+      updated = await Order.findOneAndUpdate(
+        { orderNumber: on },
+        { $set: patch },
+        { new: true, session }
+      ).lean();
+      if (!updated) {
+        const err = new Error('Order not found');
+        err.statusCode = 404;
+        err.code = 'ORDER_NOT_FOUND';
+        throw err;
+      }
+
+      const statusChanged = typeof patch.status === 'string' && patch.status !== before.status;
+      if (!actorUserId || !statusChanged) return;
+
       const items = Array.isArray(before.items) ? before.items : [];
-      if (items.length) {
+      if (!items.length) return;
+
+      if (patch.status === 'confirmed' && !before.inventoryReserved) {
         await InventoryAdjustment.insertMany(
           items.map((i) => ({
             productId: i.productId,
@@ -191,17 +196,18 @@ export async function patchOrderAdmin(orderNumber, patch, actor = {}) {
             refType: 'order',
             refId: on,
           })),
-          { ordered: true }
+          { ordered: true, session }
         );
-        await Order.updateOne({ orderNumber: on }, { $set: { inventoryReserved: true } });
-        updated.inventoryReserved = true;
-      }
-    }
 
-    // If a previously-reserved order gets cancelled, restore stock.
-    if (patch.status === 'cancelled' && before.inventoryReserved) {
-      const items = Array.isArray(before.items) ? before.items : [];
-      if (items.length) {
+        const r = await Order.updateOne(
+          { orderNumber: on, inventoryReserved: false },
+          { $set: { inventoryReserved: true } },
+          { session }
+        );
+        if (r.modifiedCount === 1) updated.inventoryReserved = true;
+      }
+
+      if (patch.status === 'cancelled' && before.inventoryReserved) {
         await InventoryAdjustment.insertMany(
           items.map((i) => ({
             productId: i.productId,
@@ -215,14 +221,20 @@ export async function patchOrderAdmin(orderNumber, patch, actor = {}) {
             refType: 'order',
             refId: on,
           })),
-          { ordered: true }
+          { ordered: true, session }
         );
-        await Order.updateOne({ orderNumber: on }, { $set: { inventoryReserved: false } });
-        updated.inventoryReserved = false;
-      }
-    }
-  }
 
-  return orderDetailDto(updated);
+        const r = await Order.updateOne(
+          { orderNumber: on, inventoryReserved: true },
+          { $set: { inventoryReserved: false } },
+          { session }
+        );
+        if (r.modifiedCount === 1) updated.inventoryReserved = false;
+      }
+    });
+    return orderDetailDto(updated);
+  } finally {
+    session.endSession();
+  }
 }
 

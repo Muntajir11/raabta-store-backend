@@ -22,9 +22,7 @@ function toCartResponse(doc) {
 
 async function getOrCreateCart(userId) {
   let cart = await Cart.findOne({ userId });
-  if (!cart) {
-    cart = await Cart.create({ userId, items: [] });
-  }
+  if (!cart) cart = await Cart.create({ userId, items: [] });
   return cart;
 }
 
@@ -175,44 +173,130 @@ export async function addCartItem(userId, input) {
     err.details = { productId: catalogProduct.productId, ...variant, available: stockQty, requested: input.qty };
     throw err;
   }
-  const cart = await getOrCreateCart(userId);
-  mergeItemIntoItems(cart.items, catalogProduct, variant, input.qty);
-  await cart.save();
-  return toCartResponse(cart);
+  const line = {
+    productId: catalogProduct.productId,
+    name: catalogProduct.name,
+    price: variant.price,
+    image: catalogProduct.image,
+    category: catalogProduct.category,
+    size: variant.size,
+    color: variant.color,
+    gsm: variant.gsm,
+  };
+  const qty = Math.min(20, Math.max(1, Number(input.qty) || 1));
+
+  // Fast path: increment qty on an existing line item.
+  let doc = await Cart.findOneAndUpdate(
+    {
+      userId,
+      items: {
+        $elemMatch: {
+          productId: line.productId,
+          size: line.size,
+          color: line.color,
+          gsm: line.gsm,
+        },
+      },
+    },
+    {
+      $inc: { 'items.$.qty': qty },
+      $set: {
+        'items.$.name': line.name,
+        'items.$.price': line.price,
+        'items.$.image': line.image,
+        'items.$.category': line.category,
+      },
+    },
+    { new: true }
+  );
+
+  // If no line item exists, push a new one (create cart if needed).
+  if (!doc) {
+    doc = await Cart.findOneAndUpdate(
+      { userId },
+      { $push: { items: { ...line, qty } } },
+      { new: true, upsert: true }
+    );
+  }
+
+  return toCartResponse(doc);
 }
 
 export async function updateCartItemQty(userId, selection, qty) {
-  const cart = await getOrCreateCart(userId);
-  const target = cart.items.find((item) => matchesLineItem(item, selection));
-  if (!target) {
+  const normalized = normalizeSelection(selection);
+  const nextQty = Math.max(0, Math.min(20, Math.floor(Number(qty) || 0)));
+
+  if (nextQty <= 0) {
+    const doc = await Cart.findOneAndUpdate(
+      { userId },
+      {
+        $pull: {
+          items: {
+            productId: normalized.productId,
+            size: normalized.size,
+            color: normalized.color,
+            gsm: normalized.gsm,
+          },
+        },
+      },
+      { new: true, upsert: true }
+    );
+    return toCartResponse(doc);
+  }
+
+  const updated = await Cart.findOneAndUpdate(
+    {
+      userId,
+      items: {
+        $elemMatch: {
+          productId: normalized.productId,
+          size: normalized.size,
+          color: normalized.color,
+          gsm: normalized.gsm,
+        },
+      },
+    },
+    { $set: { 'items.$.qty': nextQty } },
+    { new: true }
+  );
+
+  if (!updated) {
     const err = new Error('Cart item not found');
     err.statusCode = 404;
     err.code = 'CART_ITEM_NOT_FOUND';
-    err.details = {
-      userId,
-      line: normalizeSelection(selection),
-      context: 'updateCartItemQty',
-    };
+    err.details = { userId, line: normalized, context: 'updateCartItemQty' };
     throw err;
   }
-  target.qty = qty;
-  await cart.save();
-  return toCartResponse(cart);
+
+  return toCartResponse(updated);
 }
 
 export async function removeCartItem(userId, selection) {
-  const cart = await getOrCreateCart(userId);
-  const next = cart.items.filter((item) => !matchesLineItem(item, selection));
-  cart.items = next;
-  await cart.save();
-  return toCartResponse(cart);
+  const normalized = normalizeSelection(selection);
+  const doc = await Cart.findOneAndUpdate(
+    { userId },
+    {
+      $pull: {
+        items: {
+          productId: normalized.productId,
+          size: normalized.size,
+          color: normalized.color,
+          gsm: normalized.gsm,
+        },
+      },
+    },
+    { new: true, upsert: true }
+  );
+  return toCartResponse(doc);
 }
 
 export async function clearCart(userId) {
-  const cart = await getOrCreateCart(userId);
-  cart.items = [];
-  await cart.save();
-  return toCartResponse(cart);
+  const doc = await Cart.findOneAndUpdate(
+    { userId },
+    { $set: { items: [] } },
+    { new: true, upsert: true }
+  );
+  return toCartResponse(doc);
 }
 
 export async function mergeGuestCart(userId, guestItems) {

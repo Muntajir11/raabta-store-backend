@@ -2,12 +2,19 @@ import { z } from 'zod';
 import * as authService from '../services/auth.service.js';
 import { formatErrorLogPrefix, getClientIp } from '../lib/requestLog.js';
 import { makeAuthCookieHelpers } from '../lib/authTokens.js';
+import { createLoginThrottle } from '../lib/loginThrottle.js';
 
 const adminCookies = makeAuthCookieHelpers('admin');
 
 const loginSchema = z.object({
   email: z.string().trim().email('Invalid email').max(254),
   password: z.string().min(1, 'Password is required').max(128),
+});
+
+const adminLoginThrottle = createLoginThrottle({
+  maxFailuresPerIp: 5,
+  maxFailuresPerEmail: 3,
+  lockMs: 15 * 60 * 1000,
 });
 
 function formatZodError(error) {
@@ -29,6 +36,17 @@ export async function login(req, res, next) {
       });
     }
 
+    const emailNorm = parsed.data.email.toLowerCase().trim();
+    const lock = adminLoginThrottle.check(req, emailNorm);
+    if (lock.locked) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed login attempts. Please try again later.',
+        code: 'LOGIN_THROTTLED',
+        retryAfterSeconds: Math.ceil(lock.remainingMs / 1000),
+      });
+    }
+
     const data = await authService.loginUser(parsed.data);
     if (data.user.role !== 'admin') {
       return res.status(403).json({
@@ -38,10 +56,13 @@ export async function login(req, res, next) {
       });
     }
 
-    adminCookies.setAuthCookies(res, data.accessToken, data.refreshToken);
+    adminLoginThrottle.onSuccess(req, emailNorm);
+    adminCookies.setAuthCookies(req, res, data.accessToken, data.refreshToken);
     req.logMessage = `${data.user.name} logged in as admin`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
+    const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
+    if (err?.code === 'INVALID_CREDENTIALS' && email) adminLoginThrottle.onFailure(req, email);
     return next(err);
   }
 }
@@ -65,7 +86,7 @@ export async function refresh(req, res, next) {
 
     const data = await authService.refreshSession(refreshToken);
     if (data.user.role !== 'admin') {
-      adminCookies.clearAuthCookies(res);
+      adminCookies.clearAuthCookies(req, res);
       return res.status(403).json({
         success: false,
         message: 'Forbidden',
@@ -73,11 +94,11 @@ export async function refresh(req, res, next) {
       });
     }
 
-    adminCookies.setAuthCookies(res, data.accessToken, data.refreshToken);
+    adminCookies.setAuthCookies(req, res, data.accessToken, data.refreshToken);
     req.logMessage = `Admin session refreshed`;
     return res.status(200).json({ success: true, data: { user: data.user } });
   } catch (err) {
-    adminCookies.clearAuthCookies(res);
+    adminCookies.clearAuthCookies(req, res);
     return next(err);
   }
 }
@@ -91,10 +112,10 @@ export async function logout(req, res, next) {
     if (refreshToken) {
       await authService.revokeSessionByRefreshToken(refreshToken);
     }
-    adminCookies.clearAuthCookies(res);
+    adminCookies.clearAuthCookies(req, res);
     return res.status(200).json({ success: true });
   } catch (err) {
-    adminCookies.clearAuthCookies(res);
+    adminCookies.clearAuthCookies(req, res);
     return next(err);
   }
 }
@@ -103,40 +124,13 @@ export async function logout(req, res, next) {
  * GET /api/admin/auth/session
  */
 export async function session(req, res) {
-  let restored = false;
+  // Session endpoint must be idempotent (no cookie mutation).
   if (!req.authUser) {
-    try {
-      const refreshToken = adminCookies.readRefreshCookie(req);
-      if (!refreshToken) {
-        return res.status(401).json({
-          success: false,
-          message: 'Unauthorized',
-          code: 'UNAUTHORIZED',
-        });
-      }
-      const data = await authService.refreshSession(refreshToken);
-      if (data.user.role !== 'admin') {
-        adminCookies.clearAuthCookies(res);
-        return res.status(403).json({
-          success: false,
-          message: 'Forbidden',
-          code: 'FORBIDDEN',
-        });
-      }
-      adminCookies.setAuthCookies(res, data.accessToken, data.refreshToken);
-      req.authUser = data.user;
-      restored = true;
-    } catch {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized',
-        code: 'UNAUTHORIZED',
-      });
-    }
-  }
-
-  if (restored) {
-    req.logMessage = `Admin session restored`;
+    return res.status(401).json({
+      success: false,
+      message: 'Unauthorized',
+      code: 'UNAUTHORIZED',
+    });
   }
 
   res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');

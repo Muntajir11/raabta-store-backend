@@ -4,7 +4,7 @@ import { Product } from '../models/product.model.js';
 
 const createSchema = z.object({
   productId: z.string().trim().min(1, 'productId is required').max(120),
-  rating: z.number().min(1).max(5),
+  rating: z.number().int().min(1).max(5),
   comment: z.string().trim().max(4000).optional(),
 });
 

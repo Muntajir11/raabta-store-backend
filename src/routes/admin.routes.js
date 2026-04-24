@@ -3,6 +3,7 @@ import { csrfProtection } from '../middleware/csrfProtection.js';
 import { requireAdminAuth } from '../middleware/requireAdminAuth.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
 import { uploadProductImage } from '../lib/uploadProductImage.js';
+import { uploadLimiter } from '../middleware/uploadLimiter.js';
 import * as adminCustomer from '../controllers/adminCustomer.controller.js';
 import * as adminProduct from '../controllers/adminProduct.controller.js';
 import * as adminOrder from '../controllers/adminOrder.controller.js';
@@ -61,8 +62,8 @@ function multerIfMultipart(req, res, next) {
   next();
 }
 
-adminRouter.post('/products', csrfProtection, multerIfMultipart, adminProduct.create);
-adminRouter.patch('/products/:productId', csrfProtection, multerIfMultipart, adminProduct.update);
+adminRouter.post('/products', uploadLimiter, csrfProtection, multerIfMultipart, adminProduct.create);
+adminRouter.patch('/products/:productId', uploadLimiter, csrfProtection, multerIfMultipart, adminProduct.update);
 adminRouter.patch('/products/:productId/toggle-active', csrfProtection, adminProduct.toggleActive);
 adminRouter.delete('/products/:productId', csrfProtection, adminProduct.remove);
 

@@ -7,11 +7,11 @@ function pad(n, width) {
   return String(n).padStart(width, '0');
 }
 
-async function nextDesignId() {
+async function nextDesignId({ session } = {}) {
   const doc = await Counter.findByIdAndUpdate(
     { _id: 'design' },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true }
+    { new: true, upsert: true, ...(session ? { session } : {}) }
   ).lean();
   const seq = Number(doc?.seq || 0);
   return `DSN-${pad(seq, 6)}`;

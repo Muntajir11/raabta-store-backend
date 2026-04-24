@@ -9,6 +9,7 @@ import {
 } from '../lib/authTokens.js';
 
 const SALT_ROUNDS = 12;
+const REFRESH_GRACE_MS = 30 * 1000;
 
 function toPublicUser(doc) {
   return {
@@ -34,6 +35,9 @@ export async function buildSession(user) {
   user.refreshTokenHash = hashRefreshToken(refreshToken);
   user.refreshTokenJti = refreshJti;
   user.refreshTokenExpiresAt = getRefreshExpiryDate();
+  user.prevRefreshTokenHash = null;
+  user.prevRefreshTokenJti = null;
+  user.prevRefreshTokenValidUntil = null;
   await user.save();
   return {
     user: toPublicUser(user),
@@ -52,7 +56,7 @@ export async function registerUser(input) {
     const err = new Error('Email already registered');
     err.statusCode = 409;
     err.code = 'EMAIL_EXISTS';
-    err.details = { email: emailNorm, context: 'registerUser' };
+    err.details = { emailHash: hashRefreshToken(emailNorm).slice(0, 8), context: 'registerUser' };
     throw err;
   }
 
@@ -82,7 +86,7 @@ export async function loginUser(input) {
     const err = new Error('Invalid email or password');
     err.statusCode = 401;
     err.code = 'INVALID_CREDENTIALS';
-    err.details = { reason: 'no_user_for_email', email: emailNorm, context: 'loginUser' };
+    err.details = { reason: 'no_user_for_email', emailHash: hashRefreshToken(emailNorm).slice(0, 8), context: 'loginUser' };
     throw err;
   }
 
@@ -134,7 +138,9 @@ export async function refreshSession(refreshToken) {
     throw err;
   }
 
-  const user = await User.findById(userId);
+  const user = await User.findById(userId).select(
+    '+refreshTokenHash +refreshTokenJti +refreshTokenExpiresAt +prevRefreshTokenHash +prevRefreshTokenJti +prevRefreshTokenValidUntil'
+  );
   if (!user) {
     const err = new Error('Session expired');
     err.statusCode = 401;
@@ -147,13 +153,54 @@ export async function refreshSession(refreshToken) {
     throw err;
   }
 
-  // Important: do NOT rotate refresh tokens on every refresh.
-  // Rotation + concurrent refresh calls can revoke the session and clear cookies.
+  const now = Date.now();
+  const tokenHash = hashRefreshToken(refreshToken);
+  const tokenJti = typeof payload.jti === 'string' ? payload.jti : null;
+  const currentOk =
+    !!tokenJti &&
+    user.refreshTokenHash &&
+    user.refreshTokenJti &&
+    user.refreshTokenExpiresAt &&
+    user.refreshTokenExpiresAt.getTime() > now &&
+    user.refreshTokenHash === tokenHash &&
+    user.refreshTokenJti === tokenJti;
+
+  const prevOk =
+    !!tokenJti &&
+    user.prevRefreshTokenHash &&
+    user.prevRefreshTokenJti &&
+    user.prevRefreshTokenValidUntil &&
+    user.prevRefreshTokenValidUntil.getTime() > now &&
+    user.prevRefreshTokenHash === tokenHash &&
+    user.prevRefreshTokenJti === tokenJti;
+
+  if (!currentOk && !prevOk) {
+    const err = new Error('Invalid session');
+    err.statusCode = 401;
+    err.code = 'INVALID_SESSION';
+    err.details = { reason: 'refresh_token_mismatch', context: 'refreshSession' };
+    throw err;
+  }
+
+  // Rotate refresh token on every refresh, but keep the previous token valid briefly to
+  // avoid concurrent refresh calls kicking users out.
+  const nextRefreshJti = makeRefreshJti();
+  const nextRefreshToken = signRefreshToken(user, nextRefreshJti);
+  const nextRefreshTokenHash = hashRefreshToken(nextRefreshToken);
+
+  user.prevRefreshTokenHash = user.refreshTokenHash;
+  user.prevRefreshTokenJti = user.refreshTokenJti;
+  user.prevRefreshTokenValidUntil = new Date(now + REFRESH_GRACE_MS);
+  user.refreshTokenHash = nextRefreshTokenHash;
+  user.refreshTokenJti = nextRefreshJti;
+  user.refreshTokenExpiresAt = getRefreshExpiryDate();
+  await user.save();
+
   const accessToken = signAccessToken(user);
   return {
     user: toPublicUser(user),
     accessToken,
-    refreshToken,
+    refreshToken: nextRefreshToken,
   };
 }
 
@@ -162,12 +209,15 @@ export async function refreshSession(refreshToken) {
  */
 export async function revokeSessionForUser(userId) {
   const user = await User.findById(userId).select(
-    '+refreshTokenHash +refreshTokenJti +refreshTokenExpiresAt'
+    '+refreshTokenHash +refreshTokenJti +refreshTokenExpiresAt +prevRefreshTokenHash +prevRefreshTokenJti +prevRefreshTokenValidUntil'
   );
   if (!user) return;
   user.refreshTokenHash = null;
   user.refreshTokenJti = null;
   user.refreshTokenExpiresAt = null;
+  user.prevRefreshTokenHash = null;
+  user.prevRefreshTokenJti = null;
+  user.prevRefreshTokenValidUntil = null;
   await user.save();
 }
 

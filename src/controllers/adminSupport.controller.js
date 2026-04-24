@@ -6,7 +6,7 @@ const listQuerySchema = z
   .object({
     status: z.enum(['open', 'resolved']).optional(),
   })
-  .passthrough();
+  .strict();
 
 const patchSchema = z
   .object({

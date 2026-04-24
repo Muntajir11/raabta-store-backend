@@ -36,6 +36,21 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    prevRefreshTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    prevRefreshTokenJti: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    prevRefreshTokenValidUntil: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     role: {
       type: String,
       enum: ['user', 'admin'],
@@ -161,5 +176,18 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+userSchema.set('toJSON', {
+  transform(_doc, ret) {
+    delete ret.passwordHash;
+    delete ret.refreshTokenHash;
+    delete ret.refreshTokenJti;
+    delete ret.refreshTokenExpiresAt;
+    delete ret.prevRefreshTokenHash;
+    delete ret.prevRefreshTokenJti;
+    delete ret.prevRefreshTokenValidUntil;
+    return ret;
+  },
+});
 
 export const User = mongoose.models.User ?? mongoose.model('User', userSchema);

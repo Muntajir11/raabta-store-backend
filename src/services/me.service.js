@@ -1,6 +1,7 @@
 import { User } from '../models/user.model.js';
 import { Order } from '../models/order.model.js';
 import { InventoryAdjustment } from '../models/inventoryAdjustment.model.js';
+import mongoose from 'mongoose';
 
 /**
  * @param {import('mongoose').Document} doc
@@ -221,43 +222,56 @@ export async function cancelMyOrder(userId, orderNumber) {
     throw err;
   }
 
-  const updated = await Order.findOneAndUpdate(
-    { userId, orderNumber: on, status: { $nin: ['shipped', 'delivered', 'cancelled', 'refunded'] } },
-    { $set: { status: 'cancelled' } },
-    { new: true }
-  ).lean();
-
-  if (!updated) {
-    const err = new Error('This order can’t be cancelled after it has shipped');
-    err.statusCode = 400;
-    err.code = 'VALIDATION_ERROR';
-    err.details = { reason: 'already_shipped' };
-    throw err;
-  }
-
   const actorUserId = String(userId || '').trim();
-  if (actorUserId && before.inventoryReserved) {
-    const items = Array.isArray(before.items) ? before.items : [];
-    if (items.length) {
-      await InventoryAdjustment.insertMany(
-        items.map((i) => ({
-          productId: i.productId,
-          size: i.size,
-          color: i.color,
-          gsm: i.gsm,
-          delta: Math.max(0, Number(i.qty) || 0),
-          reason: 'cancel',
-          note: `Restored from cancelled order ${on}`,
-          createdBy: actorUserId,
-          refType: 'order',
-          refId: on,
-        })),
-        { ordered: true }
-      );
-      await Order.updateOne({ userId, orderNumber: on }, { $set: { inventoryReserved: false } });
-      updated.inventoryReserved = false;
-    }
-  }
+  const session = await mongoose.startSession();
+  try {
+    let updated;
+    await session.withTransaction(async () => {
+      updated = await Order.findOneAndUpdate(
+        { userId, orderNumber: on, status: { $nin: ['shipped', 'delivered', 'cancelled', 'refunded'] } },
+        { $set: { status: 'cancelled' } },
+        { new: true, session }
+      ).lean();
 
-  return orderDetailDto(updated);
+      if (!updated) {
+        const err = new Error('This order can’t be cancelled after it has shipped');
+        err.statusCode = 400;
+        err.code = 'VALIDATION_ERROR';
+        err.details = { reason: 'already_shipped' };
+        throw err;
+      }
+
+      if (actorUserId && before.inventoryReserved) {
+        const items = Array.isArray(before.items) ? before.items : [];
+        if (items.length) {
+          await InventoryAdjustment.insertMany(
+            items.map((i) => ({
+              productId: i.productId,
+              size: i.size,
+              color: i.color,
+              gsm: i.gsm,
+              delta: Math.max(0, Number(i.qty) || 0),
+              reason: 'cancel',
+              note: `Restored from cancelled order ${on}`,
+              createdBy: actorUserId,
+              refType: 'order',
+              refId: on,
+            })),
+            { ordered: true, session }
+          );
+
+          const r = await Order.updateOne(
+            { userId, orderNumber: on, inventoryReserved: true },
+            { $set: { inventoryReserved: false } },
+            { session }
+          );
+          if (r.modifiedCount === 1) updated.inventoryReserved = false;
+        }
+      }
+    });
+
+    return orderDetailDto(updated);
+  } finally {
+    session.endSession();
+  }
 }
