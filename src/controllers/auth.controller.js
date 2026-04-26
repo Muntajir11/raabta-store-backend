@@ -97,9 +97,6 @@ export async function refresh(req, res, next) {
   try {
     const refreshToken = readRefreshCookie(req);
     if (!refreshToken) {
-      console.warn(
-        `[auth] No refresh cookie — session cannot be renewed | ${formatErrorLogPrefix(req)}`
-      );
       return res.status(401).json({
         success: false,
         message: 'Session expired',
