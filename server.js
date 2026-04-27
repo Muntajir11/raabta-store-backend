@@ -79,17 +79,17 @@ async function main() {
   app.use(
     cors({
       origin(origin, callback) {
-        // Browsers always send Origin for XHR/fetch CORS requests.
-        // In local dev, Vite proxy + some tools may omit Origin; allow it.
-        // In production, reject missing Origin to keep CORS strict.
+        // Non-browser clients (health checks, direct navigation, server-to-server calls)
+        // may omit Origin. CSRF protection still defends cookie-auth mutation routes,
+        // so allow missing Origin here to avoid noisy 500s in production.
         if (!origin) {
-          if (nodeEnv !== 'production') return callback(null, true);
-          return callback(new Error('CORS'), false);
+          return callback(null, true);
         }
         if (corsAllowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        return callback(new Error('CORS'), false);
+        // Don't throw: if origin is not allowed, omit CORS headers and let the browser block.
+        return callback(null, false);
       },
       credentials: true,
     })
